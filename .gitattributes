@@ -1,0 +1,7 @@
+# 仓库内一律按字节保真，禁止任何换行符转换。
+#
+# 原因：data/codebooks/_source/MANIFEST.json 记录了每份 ArduPilot 源码证据的 sha256，
+# tests/test_codebooks_data.py 会逐文件核对；Windows 上默认的 core.autocrlf=true
+# 会把检出的 LF 改成 CRLF，导致这三条测试在干净克隆里必然失败。
+# 设定 -text 后，仓库里存的字节 = 检出到磁盘的字节，跨平台一致。
+* -text
