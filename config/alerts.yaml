@@ -1,0 +1,47 @@
+# APMLogViewer 告警配置 v1
+# 阈值来源标注：source=param 表示取自日志内参数；default-ref 表示内置参考值（机型相关，可调）
+version: 1
+
+vibration:
+  enabled: true
+  # VIBE 单位 m/s/s（DataFlash 已按 FMT 比例换算）
+  # 界面上「设置 → 告警阈值」可直接改这两项，会覆盖这里的值（改完立即重算告警）。
+  # 参考值：ArduPilot 社区经验 X/Y 轴 < 30、Z 轴 < 60 m/s²；机型差异大，仅供参考。
+  rms_warn: 30.0          # 1s 窗口内任一轴峰值超过 → 警告
+  rms_crit: 60.0          # 超过 → 严重
+  window_s: 1.0           # 滑窗长度
+  min_duration_s: 0.5     # 短于该时长的越界不报
+  merge_gap_s: 1.0        # 相邻越界区间合并间隔
+  clip_warn_total: 1      # Clip 增量总计 >= 该值 → 警告
+  clip_crit_total: 300    # Clip 增量总计 >= 该值 → 严重
+  report_axis_dominance: true
+
+battery:
+  enabled: true
+  use_params: true        # 优先用 BATT_VOLT_MIN / BATT_ARM_VOLT / BATT_CAPACITY
+  # 欠压按「单芯电压」判定：整包电压 ÷ 电芯数。
+  # cell_count = 电芯数（"14S"），0 = 自动识别；界面里手填的优先于自动。
+  # 自动识别不出来、又只有整包电压时，会出一条 hint 提示去手填电芯数。
+  cell_count: 0
+  cell_warn: 3.30         # 单芯电压低于此值 → 警告（3.3V/芯）
+  cell_crit: 3.10         # 单芯电压低于此值 → 严重（3.1V/芯）
+  # 整包绝对阈值：设置里填了非 0 才生效（低于此值报警）
+  pack_warn_v: 0.0
+  pack_crit_v: 0.0
+  pack_ratio_of_arm: 0.90 # 整包电压 < 起转电压*该比例 → 警告
+  pack_ratio_crit: 0.82   # 整包电压 < 起转电压*该比例 → 严重
+  # 电压跌落 sag：以起转后前 10s 中位数为基线，考察高油门段
+  sag_warn_pct: 8.0
+  sag_crit_pct: 15.0
+  throttle_high: 0.30     # 判定"高油门"的归一油门下限（CTUN.ThO 或 MOTB.ThrOut）
+  # 剩余电量（RemPct）已退出判定：它是飞控按电压反推的估计值，拿它再做判定等于
+  # 二次推导，且整包/单芯量级一变就失真。判定只看「整包 ÷ 电芯数」得到的单芯电压。
+  # 旧配置里若还留着 remain_warn / remain_crit，引擎一律忽略。
+  # 电池温度（部分日志为 -1/0 哨兵值，自动跳过）
+  temp_warn: 50.0
+  temp_crit: 65.0
+  # 末段电压突降（提示供电/动力中断，不等于结论）
+  end_drop_pct: 15.0
+  end_drop_window_s: 3.0
+  min_duration_s: 0.3
+  merge_gap_s: 1.5

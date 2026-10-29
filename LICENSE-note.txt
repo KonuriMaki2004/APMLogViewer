@@ -1,0 +1,2 @@
+data/codebooks/_source/ 下的文件是从 ArduPilot（GPLv3）源码树抽取的报文/模式码本证据，
+版权归 ArduPilot 项目，遵循 GPLv3；其余代码为本项目自研。

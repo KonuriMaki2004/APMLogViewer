@@ -1,0 +1,1622 @@
+{
+  "arm_methods": {
+    "0": {
+      "name": "RUDDER 舵量组合解锁"
+    },
+    "1": {
+      "name": "MAVLINK MAVLink 指令解锁"
+    },
+    "10": {
+      "name": "ADSBCOLLISIONACTION ADS-B 避碰动作(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "100": {
+      "name": "UNKNOWN 未知"
+    },
+    "11": {
+      "name": "PARACHUTE_RELEASE 抛伞(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "12": {
+      "name": "CRASH 炸机(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "13": {
+      "name": "LANDED 着陆(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "14": {
+      "name": "MISSIONEXIT 任务结束(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "15": {
+      "name": "FENCEBREACH 越出围栏(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "16": {
+      "name": "RADIOFAILSAFE 遥控失效保护(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "17": {
+      "name": "DISARMDELAY 延时上锁(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "18": {
+      "name": "GCSFAILSAFE 地面站失效保护(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "19": {
+      "name": "TERRRAINFAILSAFE 地形失效保护(源码双 r 拼写)",
+      "source_comment": "only disarm uses this..."
+    },
+    "2": {
+      "name": "AUXSWITCH 辅助通道开关解锁"
+    },
+    "20": {
+      "name": "FAILSAFE_ACTION_TERMINATE 失效保护终止动作",
+      "source_comment": "only disarm uses this..."
+    },
+    "21": {
+      "name": "TERRAINFAILSAFE 地形失效保护",
+      "source_comment": "only disarm uses this..."
+    },
+    "22": {
+      "name": "MOTORDETECTDONE 电机检测完成",
+      "source_comment": "only disarm uses this..."
+    },
+    "23": {
+      "name": "BADFLOWOFCONTROL 异常控制流",
+      "source_comment": "only disarm uses this..."
+    },
+    "24": {
+      "name": "EKFFAILSAFE EKF 失效保护",
+      "source_comment": "only disarm uses this..."
+    },
+    "25": {
+      "name": "GCS_FAILSAFE_SURFACEFAILED GCS 失效保护迫降失败",
+      "source_comment": "only disarm uses this..."
+    },
+    "26": {
+      "name": "GCS_FAILSAFE_HOLDFAILED GCS 失效保护悬停失败",
+      "source_comment": "only disarm uses this..."
+    },
+    "27": {
+      "name": "TAKEOFFTIMEOUT 起飞超时",
+      "source_comment": "only disarm uses this..."
+    },
+    "28": {
+      "name": "AUTOLANDED 自动着陆",
+      "source_comment": "only disarm uses this..."
+    },
+    "29": {
+      "name": "PILOT_INPUT_FAILSAFE 飞行员输入失效保护",
+      "source_comment": "only disarm uses this..."
+    },
+    "3": {
+      "name": "MOTORTEST 电机测试"
+    },
+    "30": {
+      "name": "TOYMODELANDTHROTTLE 玩具模式油门降落",
+      "source_comment": "only disarm uses this..."
+    },
+    "31": {
+      "name": "TOYMODELANDFORCE 玩具模式强制降落",
+      "source_comment": "only disarm uses this..."
+    },
+    "32": {
+      "name": "LANDING 降落",
+      "source_comment": "only disarm uses this..."
+    },
+    "33": {
+      "name": "DEADRECKON_FAILSAFE 推算导航失效保护",
+      "source_comment": "only disarm uses this..."
+    },
+    "34": {
+      "name": "BLACKBOX 黑匣子"
+    },
+    "35": {
+      "name": "DDS"
+    },
+    "36": {
+      "name": "AUTO_ARM_ONCE 一次性自动解锁",
+      "note": "4.7 新增（4.6 无此编号）"
+    },
+    "37": {
+      "name": "TURTLE_MODE 乌龟模式",
+      "note": "4.7 新增（4.6 无此编号）"
+    },
+    "38": {
+      "name": "TOYMODE 玩具模式",
+      "note": "4.7 新增（4.6 无此编号）"
+    },
+    "4": {
+      "name": "SCRIPTING 脚本(Lua)"
+    },
+    "5": {
+      "name": "TERMINATION 失控终止(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "6": {
+      "name": "CPUFAILSAFE CPU 失效保护(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "7": {
+      "name": "BATTERYFAILSAFE 电池失效保护(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "8": {
+      "name": "SOLOPAUSEWHENLANDED Solo 着陆暂停(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    },
+    "9": {
+      "name": "AFS AFS(仅上锁)",
+      "source_comment": "only disarm uses this..."
+    }
+  },
+  "arming_checks_bits": {
+    "0": {
+      "name": "ALL 全部检查（位0：4.6 为 ARMING_CHECK_ALL；4.7 注释 “0 used to be ALL” 但 ARM 报文仍会读到该位）",
+      "note": "仅 4.6 有该位（4.7 的 enum class Check 未定义）"
+    },
+    "1": {
+      "name": "BARO 气压计"
+    },
+    "10": {
+      "name": "LOGGING 日志"
+    },
+    "11": {
+      "name": "SWITCH 解锁开关"
+    },
+    "12": {
+      "name": "GPS_CONFIG GPS 配置"
+    },
+    "13": {
+      "name": "SYSTEM 系统"
+    },
+    "14": {
+      "name": "MISSION 任务"
+    },
+    "15": {
+      "name": "RANGEFINDER 测距仪"
+    },
+    "16": {
+      "name": "CAMERA 相机"
+    },
+    "17": {
+      "name": "AUX_AUTH 辅助授权"
+    },
+    "18": {
+      "name": "VISION 视觉"
+    },
+    "19": {
+      "name": "FFT"
+    },
+    "2": {
+      "name": "COMPASS 罗盘"
+    },
+    "20": {
+      "name": "OSD"
+    },
+    "21": {
+      "name": "CHECK_LAST 检查项上限（哨兵位，非真实检查项）",
+      "note": "4.7 新增该位（4.6 无）",
+      "source_comment": "must be last"
+    },
+    "3": {
+      "name": "GPS"
+    },
+    "4": {
+      "name": "INS 惯导"
+    },
+    "5": {
+      "name": "PARAMETERS 参数"
+    },
+    "6": {
+      "name": "RC 遥控"
+    },
+    "7": {
+      "name": "VOLTAGE 电压"
+    },
+    "8": {
+      "name": "BATTERY 电池"
+    },
+    "9": {
+      "name": "AIRSPEED 空速"
+    }
+  },
+  "error_subsystems": {
+    "1": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "MAIN_INS_DELAY 惯导数据延迟"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "MAIN 主控/导航",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "10": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FLIGHT_MODE 飞行模式",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "11": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "2": {
+          "name": "GPS_GLITCH GPS 跳变",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "GPS",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "12": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "CRASH_CHECK_CRASH 炸机判据触发（姿态误差>30°、倾角>15°、加速度<3m/s²、速度<10m/s 持续 2s）",
+          "source_usage": [
+            "ArduCopter/crash_check.cpp"
+          ]
+        },
+        "2": {
+          "name": "CRASH_CHECK_LOSS_OF_CONTROL 失控（抛伞判据）",
+          "source_usage": [
+            "ArduCopter/crash_check.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "CRASH_CHECK 炸机检测",
+      "severity": "critical",
+      "severity_basis": "source: paired MAV_SEVERITY_EMERGENCY in ArduCopter/crash_check.cpp"
+    },
+    "13": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "FLIP_ABANDONED 翻滚被放弃"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FLIP 翻滚",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "14": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "AUTOTUNE 自动调参",
+      "note": "源码注释标注 not used（4.6/4.7 均保留编号）",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "15": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "PARACHUTE_TOO_LOW 高度过低未抛伞",
+          "source_usage": [
+            "ArduCopter/crash_check.cpp"
+          ]
+        },
+        "3": {
+          "name": "PARACHUTE_LANDED 已着陆",
+          "source_usage": [
+            "ArduCopter/crash_check.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "PARACHUTES 降落伞",
+      "severity": "critical",
+      "severity_basis": "editorial"
+    },
+    "16": {
+      "ecodes": {
+        "0": {
+          "name": "EKFCHECK_VARIANCE_CLEARED EKF 方差恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "EKFCHECK_BAD_VARIANCE EKF 方差过大"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "EKFCHECK EKF 检查",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "17": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_EKFINAV EKF 导航失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "18": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "BARO_GLITCH 气压计跳变"
+        },
+        "3": {
+          "name": "BAD_DEPTH 深度异常"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "BARO 气压计",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "19": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "CPU",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "2": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "RADIO_LATE_FRAME 遥控帧迟到"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "RADIO 遥控链路",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "20": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_ADSB ADS-B 失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "21": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "MISSING_TERRAIN_DATA 缺少地形数据"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "TERRAIN 地形数据",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "22": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "2": {
+          "name": "FAILED_TO_SET_DESTINATION 目的地设置失败"
+        },
+        "3": {
+          "name": "RESTARTED_RTL RTL 重新启动"
+        },
+        "4": {
+          "name": "FAILED_CIRCLE_INIT 环绕初始化失败"
+        },
+        "5": {
+          "name": "DEST_OUTSIDE_FENCE 目的地在围栏外"
+        },
+        "6": {
+          "name": "RTL_MISSING_RNGFND RTL 缺少测距仪"
+        }
+      },
+      "name": "NAVIGATION 导航",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "23": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "2": {
+          "name": "MISSING_TERRAIN_DATA 缺少地形数据"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_TERRAIN 地形失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "24": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "EKF_PRIMARY EKF 主源",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "25": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发",
+          "source_usage": [
+            "ArduCopter/crash_check.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "THRUST_LOSS_CHECK 推力损失检测",
+      "severity": "critical",
+      "severity_basis": "source: paired MAV_SEVERITY_EMERGENCY in ArduCopter/crash_check.cpp"
+    },
+    "26": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_SENSORS 传感器失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "27": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_LEAK 漏水失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "28": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "PILOT_INPUT 飞行员输入",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "29": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_VIBE 震动失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "3": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "COMPASS 罗盘",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "30": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "INTERNAL_ERRORS_DETECTED 检测到内部错误"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "INTERNAL_ERROR 内部错误",
+      "severity": "critical",
+      "severity_basis": "editorial"
+    },
+    "31": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_DEADRECKON 推算导航失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "4": {
+      "ecodes": {
+        "0": {
+          "name": "ERROR_RESOLVED 已恢复"
+        },
+        "1": {
+          "name": "FAILED_TO_INITIALISE 初始化失败"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "OPTFLOW 光流",
+      "note": "源码注释标注 not used（4.6/4.7 均保留编号）",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "5": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_RADIO 遥控失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "6": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_BATT 电池失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "7": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_GPS GPS 失效保护",
+      "note": "源码注释标注 not used（4.6/4.7 均保留编号）",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "8": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发",
+          "source_usage": [
+            "ArduCopter/events.cpp"
+          ]
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_GCS 地面站失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "9": {
+      "ecodes": {
+        "0": {
+          "name": "FAILSAFE_RESOLVED 失效保护解除"
+        },
+        "1": {
+          "name": "FAILSAFE_OCCURRED 失效保护触发"
+        },
+        "4": {
+          "name": "UNHEALTHY 状态不健康"
+        }
+      },
+      "name": "FAILSAFE_FENCE 围栏失效保护",
+      "severity": "error",
+      "severity_basis": "editorial"
+    }
+  },
+  "event_ids": {
+    "10": {
+      "name": "ARMED 解锁"
+    },
+    "11": {
+      "name": "DISARMED 上锁",
+      "severity": "hint",
+      "severity_basis": "editorial"
+    },
+    "15": {
+      "name": "AUTO_ARMED 自动解锁"
+    },
+    "163": {
+      "name": "SURFACED 已浮出水面"
+    },
+    "164": {
+      "name": "NOT_SURFACED 未浮出水面"
+    },
+    "165": {
+      "name": "BOTTOMED 已触底"
+    },
+    "166": {
+      "name": "NOT_BOTTOMED 未触底"
+    },
+    "17": {
+      "name": "LAND_COMPLETE_MAYBE 疑似着陆"
+    },
+    "18": {
+      "name": "LAND_COMPLETE 着陆完成"
+    },
+    "19": {
+      "name": "LOST_GPS 丢失 GPS",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "21": {
+      "name": "FLIP_START 翻滚开始"
+    },
+    "22": {
+      "name": "FLIP_END 翻滚结束"
+    },
+    "25": {
+      "name": "SET_HOME 设置 HOME"
+    },
+    "26": {
+      "name": "SET_SIMPLE_ON 简单模式开"
+    },
+    "27": {
+      "name": "SET_SIMPLE_OFF 简单模式关"
+    },
+    "28": {
+      "name": "NOT_LANDED 未着陆"
+    },
+    "29": {
+      "name": "SET_SUPERSIMPLE_ON 超级简单模式开"
+    },
+    "30": {
+      "name": "AUTOTUNE_INITIALISED 自动调参初始化"
+    },
+    "31": {
+      "name": "AUTOTUNE_OFF 自动调参关"
+    },
+    "32": {
+      "name": "AUTOTUNE_RESTART 自动调参重启"
+    },
+    "33": {
+      "name": "AUTOTUNE_SUCCESS 自动调参成功"
+    },
+    "34": {
+      "name": "AUTOTUNE_FAILED 自动调参失败",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "35": {
+      "name": "AUTOTUNE_REACHED_LIMIT 自动调参达上限"
+    },
+    "36": {
+      "name": "AUTOTUNE_PILOT_TESTING 自动调参试飞"
+    },
+    "37": {
+      "name": "AUTOTUNE_SAVEDGAINS 自动调参存增益"
+    },
+    "38": {
+      "name": "SAVE_TRIM 保存配平"
+    },
+    "39": {
+      "name": "SAVEWP_ADD_WP 保存航点"
+    },
+    "41": {
+      "name": "FENCE_ENABLE 围栏启用",
+      "severity": "hint",
+      "severity_basis": "editorial"
+    },
+    "42": {
+      "name": "FENCE_DISABLE 围栏关闭"
+    },
+    "43": {
+      "name": "ACRO_TRAINER_OFF 特技教练关"
+    },
+    "44": {
+      "name": "ACRO_TRAINER_LEVELING 特技教练自动水平"
+    },
+    "45": {
+      "name": "ACRO_TRAINER_LIMITED 特技教练限制"
+    },
+    "46": {
+      "name": "GRIPPER_GRAB 夹爪抓取"
+    },
+    "47": {
+      "name": "GRIPPER_RELEASE 夹爪释放"
+    },
+    "49": {
+      "name": "PARACHUTE_DISABLED 降落伞禁用"
+    },
+    "50": {
+      "name": "PARACHUTE_ENABLED 降落伞启用"
+    },
+    "51": {
+      "name": "PARACHUTE_RELEASED 抛伞",
+      "severity": "critical",
+      "severity_basis": "editorial"
+    },
+    "52": {
+      "name": "LANDING_GEAR_DEPLOYED 起落架放下"
+    },
+    "53": {
+      "name": "LANDING_GEAR_RETRACTED 起落架收起"
+    },
+    "54": {
+      "name": "MOTORS_EMERGENCY_STOPPED 电机急停",
+      "severity": "critical",
+      "severity_basis": "editorial"
+    },
+    "55": {
+      "name": "MOTORS_EMERGENCY_STOP_CLEARED 电机急停解除"
+    },
+    "56": {
+      "name": "MOTORS_INTERLOCK_DISABLED 动力互锁关闭",
+      "severity": "error",
+      "severity_basis": "editorial"
+    },
+    "57": {
+      "name": "MOTORS_INTERLOCK_ENABLED 动力互锁开启"
+    },
+    "58": {
+      "name": "ROTOR_RUNUP_COMPLETE 旋翼加速完成",
+      "source_comment": "Heli only"
+    },
+    "59": {
+      "name": "ROTOR_SPEED_BELOW_CRITICAL 转速低于临界",
+      "severity": "error",
+      "severity_basis": "editorial",
+      "source_comment": "Heli only"
+    },
+    "60": {
+      "name": "EKF_ALT_RESET EKF 高度重置",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "61": {
+      "name": "LAND_CANCELLED_BY_PILOT 飞行员取消降落"
+    },
+    "62": {
+      "name": "EKF_YAW_RESET EKF 航向重置",
+      "severity": "warn",
+      "severity_basis": "editorial"
+    },
+    "63": {
+      "name": "AVOIDANCE_ADSB_ENABLE ADS-B 避碰启用"
+    },
+    "64": {
+      "name": "AVOIDANCE_ADSB_DISABLE ADS-B 避碰关闭"
+    },
+    "65": {
+      "name": "AVOIDANCE_PROXIMITY_ENABLE 近距避障启用"
+    },
+    "66": {
+      "name": "AVOIDANCE_PROXIMITY_DISABLE 近距避障关闭"
+    },
+    "67": {
+      "name": "GPS_PRIMARY_CHANGED 主 GPS 切换"
+    },
+    "71": {
+      "name": "ZIGZAG_STORE_A 之字形 A 点存储"
+    },
+    "72": {
+      "name": "ZIGZAG_STORE_B 之字形 B 点存储"
+    },
+    "73": {
+      "name": "LAND_REPO_ACTIVE 着陆点上报激活"
+    },
+    "74": {
+      "name": "STANDBY_ENABLE STANDBY 启用",
+      "severity": "hint",
+      "severity_basis": "editorial"
+    },
+    "75": {
+      "name": "STANDBY_DISABLE STANDBY 关闭",
+      "severity": "hint",
+      "severity_basis": "editorial"
+    },
+    "76": {
+      "name": "FENCE_ALT_MAX_ENABLE 最高围栏启用"
+    },
+    "77": {
+      "name": "FENCE_ALT_MAX_DISABLE 最高围栏关闭"
+    },
+    "78": {
+      "name": "FENCE_CIRCLE_ENABLE 圆形围栏启用"
+    },
+    "79": {
+      "name": "FENCE_CIRCLE_DISABLE 圆形围栏关闭"
+    },
+    "80": {
+      "name": "FENCE_ALT_MIN_ENABLE 最低围栏启用"
+    },
+    "81": {
+      "name": "FENCE_ALT_MIN_DISABLE 最低围栏关闭"
+    },
+    "82": {
+      "name": "FENCE_POLYGON_ENABLE 多边形围栏启用"
+    },
+    "83": {
+      "name": "FENCE_POLYGON_DISABLE 多边形围栏关闭"
+    },
+    "85": {
+      "name": "EK3_SOURCES_SET_TO_PRIMARY EK3 源设为主"
+    },
+    "86": {
+      "name": "EK3_SOURCES_SET_TO_SECONDARY EK3 源设为次"
+    },
+    "87": {
+      "name": "EK3_SOURCES_SET_TO_TERTIARY EK3 源设为第三"
+    },
+    "90": {
+      "name": "AIRSPEED_PRIMARY_CHANGED 主空速源切换"
+    }
+  },
+  "firmware_range": [
+    "4.6",
+    "4.7"
+  ],
+  "generated_at": "2026-10-17",
+  "generated_at_note": "取 _source/MANIFEST.json 的源码抓取日期；构建过程不含运行时时钟，因此离线重建可逐字节一致",
+  "generator": "tools/build_codebook.py（只读 data/codebooks/_source/，不联网）",
+  "mode_numbers": {
+    "0": {
+      "name": "STABILIZE",
+      "source_comment": "manual airframe angle with manual throttle"
+    },
+    "1": {
+      "name": "ACRO",
+      "source_comment": "manual body-frame angular rate with manual throttle"
+    },
+    "11": {
+      "name": "DRIFT",
+      "source_comment": "semi-autonomous position, yaw and throttle control"
+    },
+    "13": {
+      "name": "SPORT",
+      "source_comment": "manual earth-frame angular rate control with manual throttle"
+    },
+    "14": {
+      "name": "FLIP",
+      "source_comment": "automatically flip the vehicle on the roll axis"
+    },
+    "15": {
+      "name": "AUTOTUNE",
+      "source_comment": "automatically tune the vehicle's roll and pitch gains"
+    },
+    "16": {
+      "name": "POSHOLD",
+      "source_comment": "automatic position hold with manual override, with automatic throttle"
+    },
+    "17": {
+      "name": "BRAKE",
+      "source_comment": "full-brake using inertial/GPS system, no pilot input"
+    },
+    "18": {
+      "name": "THROW",
+      "source_comment": "throw to launch mode using inertial/GPS system, no pilot input"
+    },
+    "19": {
+      "name": "AVOID_ADSB",
+      "source_comment": "automatic avoidance of obstacles in the macro scale - e.g. full-sized aircraft"
+    },
+    "2": {
+      "name": "ALT_HOLD",
+      "source_comment": "manual airframe angle with automatic throttle"
+    },
+    "20": {
+      "name": "GUIDED_NOGPS",
+      "source_comment": "guided mode but only accepts attitude and altitude"
+    },
+    "21": {
+      "name": "SMART_RTL",
+      "source_comment": "SMART_RTL returns to home by retracing its steps"
+    },
+    "22": {
+      "name": "FLOWHOLD",
+      "source_comment": "FLOWHOLD holds position with optical flow without rangefinder"
+    },
+    "23": {
+      "name": "FOLLOW",
+      "source_comment": "follow attempts to follow another vehicle or ground station"
+    },
+    "24": {
+      "name": "ZIGZAG",
+      "source_comment": "ZIGZAG mode is able to fly in a zigzag manner with predefined point A and point B"
+    },
+    "25": {
+      "name": "SYSTEMID",
+      "source_comment": "System ID mode produces automated system identification signals in the controllers"
+    },
+    "26": {
+      "name": "AUTOROTATE",
+      "source_comment": "Autonomous autorotation"
+    },
+    "27": {
+      "name": "AUTO_RTL",
+      "source_comment": "Auto RTL, this is not a true mode, AUTO will report as this mode if entered to perform a DO_LAND_START Landing sequence"
+    },
+    "28": {
+      "name": "TURTLE",
+      "source_comment": "Flip over after crash"
+    },
+    "3": {
+      "name": "AUTO",
+      "source_comment": "fully automatic waypoint control using mission commands"
+    },
+    "4": {
+      "name": "GUIDED",
+      "source_comment": "fully automatic fly to coordinate or fly at velocity/direction using GCS immediate commands"
+    },
+    "5": {
+      "name": "LOITER",
+      "source_comment": "automatic horizontal acceleration with automatic throttle"
+    },
+    "6": {
+      "name": "RTL",
+      "source_comment": "automatic return to launching point"
+    },
+    "7": {
+      "name": "CIRCLE",
+      "source_comment": "automatic circular flight with automatic throttle"
+    },
+    "9": {
+      "name": "LAND",
+      "source_comment": "automatic landing with horizontal position control"
+    }
+  },
+  "motb_failflags_bits": {
+    "0": {
+      "name": "thrust_boost 推力提升已启用（应对电机失效）",
+      "source_comment": "true if thrust boost is enabled to handle motor failure",
+      "source_field": "_thrust_boost"
+    },
+    "1": {
+      "name": "thrust_balanced 输出推力已平衡",
+      "source_comment": "true when output thrust is well balanced",
+      "source_field": "_thrust_balanced"
+    }
+  },
+  "provenance": {
+    "basis": "每个 section 给出源码文件 + commit + 抓取日期 + sha256；raw 原文与逐文件校验位在 data/codebooks/_source/（含 MANIFEST.json）",
+    "offline_reproducible": true,
+    "sections": {
+      "arm_methods": {
+        "basis": "逐条解析枚举成员",
+        "enum": "AP_Arming::Method",
+        "files": [
+          "libraries/AP_Arming/AP_Arming.h"
+        ],
+        "note": "该库在 4.6/4.7 已由 AC_Arming 改名为 AP_Arming（libraries/AC_Arming 在两版均不存在，抓取时 404）。4.7 比 4.6 多 36/37/38（AUTO_ARM_ONCE/TURTLE_MODE/TOYMODE）。；AP_Arming::Method：4.6 与 4.7 逐成员比对结果 —— AUTO_ARM_ONCE=36 仅 4.7；TURTLE_MODE=37 仅 4.7；TOYMODE=38 仅 4.7",
+        "sources": [
+          {
+            "bytes": 11961,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Arming/AP_Arming.h",
+            "file": "libraries/AP_Arming/AP_Arming.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "70840438a82f5fc50e4a2599b683dbbc046bccc31fa8a08e44db753562ddd7c4"
+          },
+          {
+            "bytes": 12629,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Arming/AP_Arming.h",
+            "file": "libraries/AP_Arming/AP_Arming.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "daca259c79b7d0746906f3c1b84a17b6bfd8e614502e8fab4be63346b5f6cc6e"
+          }
+        ]
+      },
+      "arming_checks_bits": {
+        "basis": "key 是位号（由源码 (1U << n) 移位表达式解析），value 是检查名",
+        "enum": [
+          "AP_Arming::Check (4.7)",
+          "AP_Arming::ArmingChecks (4.6)"
+        ],
+        "files": [
+          "libraries/AP_Arming/AP_Arming.h"
+        ],
+        "note": "4.7 把 enum ArmingChecks 改名 enum class Check 并去掉 ARMING_CHECK_ 前缀；位 1..20 名称与位号在两版一致；位 0 在 4.6 是 ARMING_CHECK_ALL，4.7 注释说明曾为 ALL；位 21 是 4.7 的 CHECK_LAST 哨兵。；ArmingChecks/Check 位集：4.6 与 4.7 逐成员比对结果 —— ALL=0 仅 4.6；CHECK_LAST=21 仅 4.7",
+        "sources": [
+          {
+            "bytes": 11961,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Arming/AP_Arming.h",
+            "file": "libraries/AP_Arming/AP_Arming.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "70840438a82f5fc50e4a2599b683dbbc046bccc31fa8a08e44db753562ddd7c4"
+          },
+          {
+            "bytes": 12629,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Arming/AP_Arming.h",
+            "file": "libraries/AP_Arming/AP_Arming.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "daca259c79b7d0746906f3c1b84a17b6bfd8e614502e8fab4be63346b5f6cc6e"
+          }
+        ]
+      },
+      "error_subsystems": {
+        "basis": "Subsys 名来自 LogErrorSubsystem；ECode 先用 LogErrorCode 的 enum 内分组注释路由到子系统，再用 ArduCopter 源码里真实的 LOGGER_WRITE_ERROR(LogErrorSubsystem::X, LogErrorCode::Y) 调用校正（条目内 source_usage 给出文件）",
+        "enum": [
+          "LogErrorSubsystem",
+          "LogErrorCode"
+        ],
+        "files": [
+          "libraries/AP_Logger/AP_Logger.h",
+          "ArduCopter/crash_check.cpp",
+          "ArduCopter/events.cpp",
+          "libraries/AP_InternalError/AP_InternalError.h",
+          "libraries/AP_InternalError/AP_InternalError.cpp"
+        ],
+        "note": "ERR.Subsys 不来自 AP_InternalError。4.6/4.7 的 AP_InternalError 已改为 error_t 位掩码 + error_bit_descriptions[]（见 _source 原文），既没有 subsystem 数组也没有 error_code_str。源码注释原文：“bizarrely this enumeration has lots of duplicate values”——同一 ECode 在不同子系统下语义不同，所以 ecodes 挂在子系统下。；LogErrorSubsystem：4.6 与 4.7 逐成员比对结果 —— 完全一致",
+        "sources": [
+          {
+            "bytes": 21208,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Logger/AP_Logger.h",
+            "file": "libraries/AP_Logger/AP_Logger.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "aafaaecf4662b3f7c16ca09a3bad9bfca38a14f5b74cc939205b4c6e702d9a98"
+          },
+          {
+            "bytes": 21704,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Logger/AP_Logger.h",
+            "file": "libraries/AP_Logger/AP_Logger.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "5a1b8d27c0ee385174213b95fa94cc0cd47b6688b987dd490bb2bd400850da33"
+          },
+          {
+            "bytes": 13290,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/ArduCopter/crash_check.cpp",
+            "file": "ArduCopter/crash_check.cpp",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "9c22a94df9d624b43ee7397373fdc4bf8c97599d73638540b296db8f63872c62"
+          },
+          {
+            "bytes": 13550,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/ArduCopter/crash_check.cpp",
+            "file": "ArduCopter/crash_check.cpp",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "02bf3f877a9a5bec2adbef070d0cfe9edfce13a355f4f79f9777b6116b42f170"
+          },
+          {
+            "bytes": 19641,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/ArduCopter/events.cpp",
+            "file": "ArduCopter/events.cpp",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "e47dbe228e2f1ffa8f5038ed2178ca075206b96d74b57fe70ea2fa542b199904"
+          },
+          {
+            "bytes": 20043,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/ArduCopter/events.cpp",
+            "file": "ArduCopter/events.cpp",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "217070ca162fcc2e2206f32b90b0d0c66de7e71c3644bd0c7e857bbb43f8743d"
+          },
+          {
+            "bytes": 5370,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_InternalError/AP_InternalError.h",
+            "file": "libraries/AP_InternalError/AP_InternalError.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "32b3b9eeb48368aeaa4c0943e2653f1ecb22353c2cc9a25bb13ed0c4aec05687"
+          },
+          {
+            "bytes": 5254,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_InternalError/AP_InternalError.h",
+            "file": "libraries/AP_InternalError/AP_InternalError.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "1ee7ed57a9bbd5707d27111f5c85c5322e7719d0a4870bf31663679d4f9c47bd"
+          },
+          {
+            "bytes": 4669,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_InternalError/AP_InternalError.cpp",
+            "file": "libraries/AP_InternalError/AP_InternalError.cpp",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "5f4f31f7992a1ec34b13f4abd0315584f250f9d0e92b2059c7acdde8a9b02ed0"
+          },
+          {
+            "bytes": 3683,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_InternalError/AP_InternalError.cpp",
+            "file": "libraries/AP_InternalError/AP_InternalError.cpp",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "1038400ff92b996a9fcd4c5371e67b62df37dfb669fe7fbbbff42607cd2d3f31"
+          }
+        ]
+      },
+      "event_ids": {
+        "basis": "逐条解析枚举成员；severity 是 APMLogViewer 的展示判级（条目内标 severity_basis=editorial）",
+        "enum": "LogEvent",
+        "files": [
+          "libraries/AP_Logger/AP_Logger.h"
+        ],
+        "note": "旧命名 EVArmDisable/EVDISARM/EVStabilize 在 4.6/4.7 源码中不存在；解锁/上锁是 LogEvent::ARMED(10)/DISARMED(11)。未发现 Copter 机型专有 EV 段扩展（ArduCopter/*.cpp 只用 LogEvent::）。；LogEvent：4.6 与 4.7 逐成员比对结果 —— 完全一致",
+        "sources": [
+          {
+            "bytes": 21208,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Logger/AP_Logger.h",
+            "file": "libraries/AP_Logger/AP_Logger.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "aafaaecf4662b3f7c16ca09a3bad9bfca38a14f5b74cc939205b4c6e702d9a98"
+          },
+          {
+            "bytes": 21704,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Logger/AP_Logger.h",
+            "file": "libraries/AP_Logger/AP_Logger.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "5a1b8d27c0ee385174213b95fa94cc0cd47b6688b987dd490bb2bd400850da33"
+          }
+        ]
+      },
+      "mode_numbers": {
+        "basis": "逐条解析枚举成员；name 为源码枚举名原文（大写），未加解释",
+        "enum": "Mode::Number",
+        "files": [
+          "ArduCopter/mode.h"
+        ],
+        "note": "Mode::Number：4.6 与 4.7 逐成员比对结果 —— 完全一致",
+        "sources": [
+          {
+            "bytes": 72977,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/ArduCopter/mode.h",
+            "file": "ArduCopter/mode.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "30e274e90c0e5d7904cfe9fecceeeb0e7803f3c19277029e9faf41d525a1e5f2"
+          },
+          {
+            "bytes": 76128,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/ArduCopter/mode.h",
+            "file": "ArduCopter/mode.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "3bde555aca6f4b560a8034349412e9b153b55e1d0a039e57eac236dfe031cec3"
+          }
+        ]
+      },
+      "motb_failflags_bits": {
+        "basis": "解析 AP_MotorsMulticopter::Log_Write() 里 mot_fail_flags : (uint8_t)(_thrust_boost | (_thrust_balanced << 1U)) 的位组装表达式得到位号，语义取 AP_Motors_Class.h 成员声明行的注释；条目 name 里的中文是该行注释的直译，source_comment 保留英文原文",
+        "enum": null,
+        "files": [
+          "libraries/AP_Motors/AP_MotorsMulticopter.cpp",
+          "libraries/AP_Motors/AP_Motors_Class.h",
+          "libraries/AP_Logger/LogStructure.h"
+        ],
+        "note": "MOTB 报文格式见 LogStructure.h 的 \"MOTB\", \"QfffffB\", \"TimeUS,LiftMax,BatVolt,ThLimit,ThrAvMx,ThrOut,FailFlags\"，FailFlags 是 uint8_t，4.6/4.7 只有这 2 位；AP_Motors 里没有独立的 FailFlags 枚举。",
+        "sources": [
+          {
+            "bytes": 32019,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Motors/AP_MotorsMulticopter.cpp",
+            "file": "libraries/AP_Motors/AP_MotorsMulticopter.cpp",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "969b76ae33d2a6da8a529811d1771825d81a164501ade71a7d4b0f0f9a96b606"
+          },
+          {
+            "bytes": 41983,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Motors/AP_MotorsMulticopter.cpp",
+            "file": "libraries/AP_Motors/AP_MotorsMulticopter.cpp",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "4f837941b6f00ea5b42c6f8efbb57ef8011c69a5a9a1ebb2720ca0aea5c4a342"
+          },
+          {
+            "bytes": 18570,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Motors/AP_Motors_Class.h",
+            "file": "libraries/AP_Motors/AP_Motors_Class.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "797e1d6cb463deac5bd9d5076a2072fd8892eb902dfacf49ad4e04dfcedec1e7"
+          },
+          {
+            "bytes": 19293,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Motors/AP_Motors_Class.h",
+            "file": "libraries/AP_Motors/AP_Motors_Class.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "13394f23e3a5bdf4e409ae87698cb70daa64759ed36f413392d74a4669a50ab0"
+          },
+          {
+            "bytes": 46146,
+            "commit": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+            "commit_subject": "Copter: version to 4.6.3 official fix",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/92b0cd78/libraries/AP_Logger/LogStructure.h",
+            "file": "libraries/AP_Logger/LogStructure.h",
+            "firmware": "ArduCopter V4.6.3",
+            "http_status": 200,
+            "ref": "92b0cd78",
+            "sha256": "61c27059585e9d5cd0482a07fee3fae5c695b55be7415d426deca85eb82b2d0a"
+          },
+          {
+            "bytes": 47197,
+            "commit": "1511f27194f1dcc3728270883047bdf022b3fd53",
+            "commit_subject": "Plane: version to 4.7.0",
+            "fetch_date": "2026-10-17",
+            "fetch_url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/1511f271/libraries/AP_Logger/LogStructure.h",
+            "file": "libraries/AP_Logger/LogStructure.h",
+            "firmware": "ArduCopter V4.7.0",
+            "http_status": 200,
+            "ref": "1511f271",
+            "sha256": "73cb573d9dfebb8f0ed6c4a1edcddd7aa31caf60661207f1f4ee408d5c50aabc"
+          }
+        ]
+      }
+    }
+  },
+  "source": {
+    "commits": {
+      "4.6": {
+        "full": "92b0cd788ec29406f26c6f9c31d5ceedbd1cc538",
+        "short": "92b0cd78",
+        "subject": "Copter: version to 4.6.3 official fix"
+      },
+      "4.7": {
+        "full": "1511f27194f1dcc3728270883047bdf022b3fd53",
+        "short": "1511f271",
+        "subject": "Plane: version to 4.7.0"
+      }
+    },
+    "files": [
+      "ArduCopter/Copter.h",
+      "ArduCopter/Log.cpp",
+      "ArduCopter/crash_check.cpp",
+      "ArduCopter/defines.h",
+      "ArduCopter/events.cpp",
+      "ArduCopter/mode.h",
+      "libraries/AP_Arming/AP_Arming.cpp",
+      "libraries/AP_Arming/AP_Arming.h",
+      "libraries/AP_InternalError/AP_InternalError.cpp",
+      "libraries/AP_InternalError/AP_InternalError.h",
+      "libraries/AP_Logger/AP_Logger.cpp",
+      "libraries/AP_Logger/AP_Logger.h",
+      "libraries/AP_Logger/LogStructure.h",
+      "libraries/AP_Motors/AP_MotorsMulticopter.cpp",
+      "libraries/AP_Motors/AP_MotorsMulticopter.h",
+      "libraries/AP_Motors/AP_Motors_Class.cpp",
+      "libraries/AP_Motors/AP_Motors_Class.h"
+    ],
+    "project": "ArduPilot",
+    "ref_note": "不用分支/tag 名（抓取时 Copter-4.6、Copter-4.7、ArduCopter-4.6.3、ArduCopter-4.7.0 全部 404），改用真日志固件自报的 git commit",
+    "repository": "https://github.com/ArduPilot/ardupilot",
+    "tags": [
+      "ArduCopter V4.6.3@92b0cd78",
+      "ArduCopter V4.7.0@1511f271"
+    ]
+  },
+  "unknown": [
+    {
+      "item": "EV.Arg",
+      "reason": "EV 报文 Arg 的语义随 Id 变化，4.6/4.7 源码没有统一枚举；内核 EventRec 只在 extra 保留原值，故不映射"
+    },
+    {
+      "item": "MODE.Rsn",
+      "reason": "ModeReason 在 libraries/AP_Vehicle/ModeReason.h，未抓取且内核codebooks.py 无对应 section"
+    },
+    {
+      "item": "CMD.Cmd",
+      "reason": "属 MAVLink MAV_CMD 枚举，非 Copter 源码，内核无对应 section"
+    },
+    {
+      "item": "ERR Subsys > 31",
+      "reason": "4.6/4.7 的 LogErrorSubsystem 最大 31，真日志未出现更大值，不猜测"
+    },
+    {
+      "item": "AP_InternalError 内部错误位",
+      "reason": "4.6/4.7 已改为 error_t 位掩码 + error_bit_descriptions，与 ERR.Subsys/ECode 不是同一套编码；内核目前没有对应 section，需要时再加"
+    },
+    {
+      "item": "mode 编号 30 / 127",
+      "reason": "mode.h 只有注释保留（30=offboard/lua、127=Skybrush 分叉），没有枚举名，不收录"
+    },
+    {
+      "item": "LogEvent 68/69/70",
+      "reason": "源码注释 “68, 69, 70 were winch events”，已废弃，不收录"
+    },
+    {
+      "item": "MOTB FailFlags 位 >=2",
+      "reason": "源码只组装 2 位，其余位不出现；不编造"
+    }
+  ],
+  "version": "1.0.0"
+}

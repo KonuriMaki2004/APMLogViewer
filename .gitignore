@@ -1,0 +1,27 @@
+# 虚拟环境与构建产物
+.venv/
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 运行期缓存（%LOCALAPPDATA%\APMLogViewer 的镜像）
+cache/
+*.npz
+
+# 自检截图与临时核查文件
+selftest/
+*.png
+!_source/**/*.png
+
+# 日志与本地数据
+logs/
+*.BIN
+*.log
+backup_param.json
+
+# 编辑器
+.vscode/
+.idea/
