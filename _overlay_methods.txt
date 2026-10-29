@@ -1,0 +1,124 @@
+    # ---------------- 叠加绘制 ----------------
+
+    def _spec_for_key(self, k: ChannelKey, t0: float, t1: float, suffix: str = "",
+                      color: Optional[tuple[int, int, int]] = (10, 10, 10)
+                      ) -> Optional[LaneSpec]:
+        """一条通道 → LaneSpec；取不到（0 点/全 nan/异常）返回 None，绝不抛。
+
+        color=None 表示"交给 set_lanes 按主题调色板分配"（叠加曲线用默认叠加色）。
+        """
+        if self.store is None:
+            return None
+        try:
+            sd = self.store.series(k, t0, t1, max_points=20000)
+        except Exception as exc:                       # noqa: BLE001
+            log.debug("取通道失败 %s: %s", k.key, exc)
+            return None
+        if sd.n == 0 or not np.isfinite(sd.v).any():
+            return None
+        spec = LaneSpec.from_series(sd, color if color is not None else (0, 0, 0))
+        spec.label = k.label + suffix
+        spec.key = k.key
+        spec.note = k.key
+        if color is None:
+            spec.color = None
+        return spec
+
+    def _open_overlay_dialog(self) -> None:
+        """「叠加绘制」：把若干通道叠成一条泳道，或叠到已有泳道上。"""
+        if self.store is None:
+            self.set_status("先打开一份日志，再叠加绘制")
+            return
+        try:
+            infos = self.store.channel_infos()
+        except Exception as exc:                       # noqa: BLE001
+            log.exception("读取通道列表失败")
+            self.set_status(f"读取通道列表失败：{type(exc).__name__}: {exc}")
+            return
+        chans = [(c.key.key,
+                  f"{c.key.type}.{c.key.field}" + (f" [#{c.key.inst}]"
+                                                   if c.key.inst is not None else ""))
+                 for c in infos]
+        pre: list = []
+        try:
+            pre = list(self.channel_tree.selected_keys())
+        except Exception:                              # noqa: BLE001
+            log.debug("读取通道树选中项失败", exc_info=True)
+        dlg = OverlayDialog(chans, self.plot.lane_labels(), pre, self)
+        dlg.setWindowTitle("叠加绘制")
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        keys: list[ChannelKey] = []
+        for raw in dlg.checked_keys():
+            try:
+                k = ChannelKey.parse(str(raw))
+            except ValueError:
+                continue
+            if k not in keys:
+                keys.append(k)
+        if not keys:
+            return
+        if dlg.is_new_lane():
+            self._add_overlay_group(keys)
+        else:
+            self._add_lane_overlays(dlg.target(), keys)
+
+    def _add_overlay_group(self, keys: list[ChannelKey]) -> None:
+        """新建一条叠加泳道：第 1 条主曲线，其余同轴叠加（先不重建，直接追加更跟手）。"""
+        if len(keys) < 2:
+            return
+        self._groups.append(list(keys))
+        self._apply(keep_window=True)
+        self.tabs.setCurrentIndex(1)
+        self.set_status(f"已叠加绘制：{keys[0].label} + {len(keys) - 1} 条对比曲线（共用 Y 轴）")
+        self._save_view()
+
+    def _add_lane_overlays(self, label: str, keys: list[ChannelKey]) -> None:
+        """把通道追加成某条已有泳道的叠加曲线（不重建整页，只加曲线）。"""
+        labels = self.plot.lane_labels()
+        if label not in labels:
+            self.set_status(f"没找到泳道「{label}」，可能刚被切走了")
+            return
+        idx = labels.index(label)
+        merged: list[ChannelKey] = []
+        for i, (lbl, old) in enumerate(self._lane_overlays):
+            if lbl == label:
+                merged = list(old)
+                for k in keys:
+                    if k not in merged:
+                        merged.append(k)
+                self._lane_overlays[i] = (lbl, merged)
+                break
+        else:
+            merged = list(keys)
+            self._lane_overlays.append((label, merged))
+        win = self._win
+        if not win:
+            win = (float(self.store.meta.get("stats", {}).get("t_start", 0.0) or 0.0),
+                   float(self.store.meta.get("t_end", 0.0) or 0.0))
+        added = 0
+        for k in keys:
+            spec = self._spec_for_key(k, win[0], win[1], color=None)
+            if spec is None:
+                self.set_status(f"{k.label} 在当前离线窗口里没有有效点，未叠加")
+                continue
+            if self.plot.add_overlay(idx, spec):
+                added += 1
+        if added:
+            self.set_status(f"已把 {added} 条曲线叠加到「{label}」（虚线，各自一条胶囊）")
+            self._save_view()
+
+    def _apply_lane_overlays(self, win: tuple[float, float]) -> None:
+        """重建泳道后把「叠加到已有泳道」的曲线补回去（set_lanes 会清空运行时叠加）。"""
+        if not self._lane_overlays:
+            return
+        labels = self.plot.lane_labels()
+        for label, keys in list(self._lane_overlays):
+            if label not in labels:
+                continue
+            idx = labels.index(label)
+            for k in keys:
+                spec = self._spec_for_key(k, win[0], win[1], color=None)
+                if spec is not None:
+                    self.plot.add_overlay(idx, spec)
+

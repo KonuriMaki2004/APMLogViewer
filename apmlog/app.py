@@ -3143,6 +3143,52 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             rep.append(f"  左侧栏宽 {split.sizes()[0]} ｜标签区最小宽 {win.tabs.minimumSizeHint().width()}")
         except Exception as exc:                       # noqa: BLE001 只为自检输出
             rep.append(f"  插件: 读取失败（{type(exc).__name__}: {exc}）")
+
+        # ---- 安装包凒烟：码表 / 详情弹窗 / 左侧栏拖动（都是必须在装置上能用的东西）----
+        try:
+            cb = win.store.cb
+            mode_name = cb.mode_name(2)
+            err_txt, err_sev = cb.err_info(12, 1)
+            rep.append(f"  码表: mode(2)={mode_name}｜ERR 12/1 首行={err_txt.splitlines()[0][:36]}"
+                       f"｜严重度={err_sev}")
+        except Exception as exc:                       # noqa: BLE001
+            rep.append(f"  码表: 读取失败（{type(exc).__name__}: {exc}）")
+        try:
+            from apmlog.ui.eventhelp import EventHelpDialog
+            got: list[tuple[object, dict]] = []
+            orig_show = win._show_help
+            win._show_help = lambda entry, **kw: got.append((entry, kw))   # 构造但不弹模态
+            ev0 = next((e for e in win._events if e.kind == "ERR"),
+                       win._events[0] if win._events else None)
+            if ev0 is not None:
+                win._open_event_help(ev0)
+            if win._alerts:
+                win._open_alert_help(win._alerts[0])
+            win._show_help = orig_show
+            if got:
+                e0, kw0 = got[0]
+                dlg = EventHelpDialog(e0, subject=kw0["subject"], meta=kw0["meta"], raw=kw0["raw"])
+                plain = dlg.plain_text()
+                dlg.close()
+                dlg.deleteLater()
+                rep.append(f"  详情弹窗: 打开 {len(got)} 个（事件+告警）｜首条《{e0.title}》"
+                           f"命中={e0.matched} 建议{len(e0.actions)}条 纯文本{len(plain)}字")
+            else:
+                rep.append("  详情弹窗: 这份日志没取到说明（无可双击事件）")
+        except Exception as exc:                       # noqa: BLE001
+            rep.append(f"  详情弹窗: 失败（{type(exc).__name__}: {exc}）")
+        try:
+            split = win.centralWidget().widget(0)
+            before = split.sizes()[0]
+            split.setSizes([620, max(400, split.width() - 625)])
+            _pump(app, 300)
+            after = split.sizes()[0]
+            split.setSizes([before, max(400, split.width() - before - 5)])
+            _pump(app, 200)
+            rep.append(f"  左侧栏拖动: {before} → {after}"
+                       f"（{'可拉大' if after >= min(600, split.width() // 2) else '被钉住!'}）")
+        except Exception as exc:                       # noqa: BLE001
+            rep.append(f"  左侧栏拖动: 失败（{type(exc).__name__}: {exc}）")
         rep.append(f"  PNG: {out} {'OK' if ok else 'FAIL'}  轨迹页: {stem}_map{suf} {'OK' if ok_map else 'FAIL'}")
         for line in rep:
             print(line)

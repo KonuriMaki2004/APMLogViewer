@@ -534,7 +534,24 @@ class SeriesPlot(QtWidgets.QWidget):
             self._theme_btn.addAction(act)
         hl.addWidget(self._theme_btn)
         hl.addStretch(1)
-        lay.addWidget(self._header)
+        # 胶囊行不能直接进页面布局：一条曲线一个胶囊，日志泳道/幽灵曲线一多，
+        # 这一行就长到 1800+，把整个标签区的最小宽顶起来，左侧分隔条就拉不动了
+        # （2026-10-29 实测：画过曲线页后 page.min 906 → 1836）。
+        # 包一层横向滚动宿主：装不下就出横向滚动条，胶囊仍可滚到。
+        self._header_host = QtWidgets.QScrollArea(self)
+        self._header_host.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._header_host.setWidgetResizable(True)
+        self._header_host.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._header_host.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._header_host.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._header_host.setWidget(self._header)
+        self._header_host.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                        QtWidgets.QSizePolicy.Policy.Fixed)
+        self._header_host.setMinimumHeight(self._header.sizeHint().height())
+        self._header_host.setMaximumHeight(self._header.sizeHint().height())
+        self._header_host.horizontalScrollBar().rangeChanged.connect(
+            lambda _a, _b: QtCore.QTimer.singleShot(0, self._sync_header_height))
+        lay.addWidget(self._header_host)
 
         self._graphics = pg.GraphicsLayoutWidget(None)
         self._graphics.setBackground(_THEME[self._theme]["bg"])
@@ -1030,6 +1047,19 @@ class SeriesPlot(QtWidgets.QWidget):
         self._root_plot = None
         for btn in self._header.findChildren(QtWidgets.QPushButton):
             btn.deleteLater()
+        self._sync_header_height()
+
+    def _sync_header_height(self) -> None:
+        """胶囊行高度跟着“有没有横向滚动条”变，否则胶囊会被切掉一半。"""
+        host = getattr(self, "_header_host", None)
+        if host is None:
+            return
+        h = self._header.sizeHint().height()
+        if host.horizontalScrollBar().isVisible():
+            h += host.horizontalScrollBar().sizeHint().height()
+        if host.minimumHeight() != h:
+            host.setMinimumHeight(h)
+            host.setMaximumHeight(h)
 
     def _add_chip(self, i: int, lane: _Lane, curve: int = 0) -> None:
         """一条曲线一个胶囊。curve=0 是主曲线，1.. 对应 lane.ghosts。
@@ -1067,6 +1097,7 @@ class SeriesPlot(QtWidgets.QWidget):
         self._headerLayout().insertWidget(self._headerLayout().count() - 2, btn)
         self._chips.append(btn)
         self._chip_map[(i, curve)] = btn
+        self._sync_header_height()          # 胶囊数变了，行高要跟着滚动条重算
 
     def _headerLayout(self) -> QtWidgets.QHBoxLayout:
         lay = self._header.layout()

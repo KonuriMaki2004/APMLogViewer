@@ -300,3 +300,56 @@ selftest 的墙钟里固定含 4.0 s + 0.6 s 的事件泵等待（`app.py::_pump
 4. 本轮因清理进程而中断的跑：`packaging/logs/smoke-*.txt` 里 0 字节的文件是**正常现象**
    （GUI 模式本身不写 stdout，tee 文件为空），不是被中断的证据；所有计入结论的跑
    都是看到了完整尾行（`PNG: … OK` / `共 39 条` / `rc=0`）的那次。
+
+---
+
+## 安装包（Inno Setup，Windows x64 安装版）
+
+免安装 zip 之外，仓库另带一份**安装版**构建脚本 `packaging/installer.iss`：
+装到 `%LOCALAPPDATA%\Programs\APMLogViewer`（不需要管理员）、带开始菜单/可选桌面快捷方式、
+带标准卸载项；装的就是完整 onedir 包（`_internal/data/knowledge`、`_internal/data/codebooks`、
+`_internal/config/alerts.yaml` 全在里面）。
+
+### 构建
+
+```powershell
+# 1) 先出冻结包
+.venv\Scripts\python.exe packaging\build.py build
+
+# 2) 再压安装包（Inno Setup 6，ISCC 在用户目录）
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" packaging\installer.iss
+# 产物：release\APMLogViewer-<版本>-win64-setup.exe
+```
+
+`packaging/ChineseSimplified.isl` 是安装界面的简体中文语言包（取自 jrsoftware/issrc，
+Inno 6.5.0+ 格式），与 `installer.iss` 放在一起编译，不需要预装语言包。
+
+### 静默安装 / 卸载（回归用）
+
+```powershell
+# 安装到默认位置
+.\release\APMLogViewer-0.1.0-win64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+    /LOG="%TEMP%\apmlog_install.log"
+
+# 安装到指定目录
+... /DIR="D:\tools\APMLogViewer"
+
+# 卸载
+& "$env:LOCALAPPDATA\Programs\APMLogViewer\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+安装后可用 `--selftest` 做装置冒烟（报告写在 PNG 同目录的 `*_selftest.txt`）：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\APMLogViewer\APMLogViewer.exe" --selftest "<日志.BIN>" --png "$env:TEMP\exe.png"
+```
+
+报告里应看到：`知识库: {...by_subsys: 31...}`、`知识库试匹配 ERR 12/1 → … 命=True`、
+`码表: mode(2)=ALT_HOLD…`、`详情弹窗: 打开 2 个…`、`插件: …=loaded`、
+`左侧栏拖动: … 可拉大`。
+
+### 目标平台
+
+只有 **Windows 10/11 x64**。PyInstaller 不能交叉编译，Linux/macOS 安装包必须在对应系统上
+构建（Qt 6.12 + Python 3.14 的 PySide6 轮子也按平台分发）；本项目当前没有 Linux/macOS 构建机，
+所以发布只含 Windows 安装包。

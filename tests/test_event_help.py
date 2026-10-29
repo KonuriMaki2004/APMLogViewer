@@ -322,6 +322,8 @@ class TestMainWindowWiring(unittest.TestCase):
         self.win.event_table.set_events([self._err_ev()])
         seeks: list[float] = []
         self.win.event_table.seekRequested.connect(seeks.append)
+        self.win.event_table.clearSelection()      # 保证 selectRow(0) 真的产生选择变化
+        self.win.event_table.setCurrentCell(-1, -1)
         self.win.event_table.selectRow(0)
         pump()
         self.assertEqual(seeks, [12.5], "原有单击定位行为不能变")
@@ -348,6 +350,8 @@ class TestMainWindowWiring(unittest.TestCase):
         self.win.alert_table.set_alerts([hit])
         seeks: list[object] = []
         self.win.alert_table.seekRequested.connect(seeks.append)
+        self.win.alert_table.clearSelection()      # 别的用例可能先选中过第 0 行
+        self.win.alert_table.setCurrentCell(-1, -1)
         self.win.alert_table.selectRow(0)
         pump()
         self.assertEqual(seeks, [hit])
