@@ -17,11 +17,14 @@ import logging
 import os
 import shutil
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from apmlog.core import cache as _cache
 from apmlog.core import reader as _rd
 from apmlog.ui import modecolors as _mc        # 时间线模式色带配色（纯函数，无 Qt 依赖）
 from apmlog.ui import modecolors as _modecolors
@@ -47,6 +50,7 @@ DEFAULTS: dict[str, Any] = {
     "badge_tol_px": 9.0,       # 事件徽标悬停命中容差
     "refine_debounce_ms": 350,  # 滚轮放大后回内核重取数的去抖
     "dl_blocks": 120,          # 飞控下载每请求块数（真机扫参最优）
+    "dl_transport": "auto",    # 下载通道：auto（MAVFTP→回退 LOG_*）/ ftp / log
     "play_rate": 4.0,          # 时间线播放倍速（日志是真实时间，4× 十分钟飞行 2.5 分播完）
     "play_follow": False,      # 播放时地图视野是否跟着飞机走
     "gauge_show": True,        # 地图左下角的罗盘/姿态球仪表
@@ -69,6 +73,13 @@ DEFAULTS: dict[str, Any] = {
     # 插件额外扫描目录（JSON 数组字符串）。默认目录永远是
     # %LOCALAPPDATA%\APMLogViewer\plugins，这里只记用户自己追加的。
     "plugin_dirs": "[]",
+    # 解析缓存自动清理：开关 + 策略（7d / 3d / 1g / custom）+ 自定义条件
+    "cache_auto_clean": False,
+    "cache_clean_policy": "7d",
+    "cache_custom_days": 7,     # 自定义：超过 N 天未使用就删（0 = 不限）
+    "cache_custom_mb": 1024,    # 自定义：占用超过 N MB 就删到阀值以下（0 = 不限）
+    "cache_clean_last_ts": 0.0,  # 上次自动清理时间（Unix 秒，0 = 从未）
+    "cache_clean_last_freed": 0,  # 上次释放字节数（只用于界面显示）
 }
 
 #: 取值范围，越界一律夹住而不是报错
@@ -89,6 +100,10 @@ RANGES: dict[str, tuple[float, float]] = {
     "pack_crit_v": (0.0, 200.0),
     "dl_blocks": (1, 160),
     "play_rate": (0.25, 64.0),
+    "cache_custom_days": (0, 365),
+    "cache_custom_mb": (0, 1024 * 1024),
+    "cache_clean_last_ts": (0.0, 1e11),
+    "cache_clean_last_freed": (0, 1 << 44),
 }
 
 #: 已经做掉的功能留下的旧键。未知键本来会被 `_raw_extras` 原样存回去（为了前向
@@ -363,6 +378,66 @@ def cache_dir() -> Path:
     return _rd.cache_root()
 
 
+def cache_usage_text(root: Optional[Path] = None) -> str:
+    """当前缓存占用的可读文字（失败也返回非空）。
+
+    设置页与状态栏都用它，保证“没缓存”与“算不出来”不会都显示成空白。
+    """
+    root = cache_dir() if root is None else Path(root)
+    try:
+        usage = _cache.scan(root)
+        total = usage.bytes
+    except Exception:                                     # noqa: BLE001
+        total = 0
+    try:
+        from apmlog.core.model import human_size
+        size = human_size(float(total))
+    except Exception:                                     # noqa: BLE001
+        size = f"{total} B"
+    return size
+
+
+class CacheJanitor(QtCore.QObject):
+    """后台跑一次“按策略清理”，完成后发 ``done(dict)``。
+
+    放到线程里是因为要扫目录并删文件，几百 MB 时同步做会卡住主窗。
+    """
+
+    done = QtCore.Signal(dict)
+
+    def __init__(self, parent: Optional[QtCore.QObject] = None) -> None:
+        super().__init__(parent)
+        self._busy = False
+
+    def busy(self) -> bool:
+        return self._busy
+
+    def run_async(self, *, force: bool = False) -> bool:
+        """发起一次清理；已有任务在跑就返回 False。"""
+        if self._busy:
+            return False
+        self._busy = True
+        root = cache_dir()
+        settings = Settings.instance()
+        threading.Thread(target=self._work, args=(root, settings, force),
+                         name="cache-janitor", daemon=True).start()
+        return True
+
+    def _work(self, root: Path, settings: "Settings", force: bool) -> None:
+        res: dict = {}
+        try:
+            res = _cache.run_if_due(root, settings, force=force) or {}
+        except Exception:                                 # noqa: BLE001 线程里不招异常
+            log.exception("缓存自动清理失败")
+            res = {"error": "清理失败，详见日志"}
+        finally:
+            self._busy = False
+        try:
+            self.done.emit(res)
+        except RuntimeError:                              # 接收方已销毁
+            pass
+
+
 def clear_parse_cache(keep_last: int = 0) -> tuple[int, int]:
     """删掉解析缓存目录里的 npz/json（日志重解析即可重建），返回 (删除文件数, 释放字节)。
 
@@ -416,7 +491,8 @@ class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None,
                  s: Optional[Settings] = None,
                  cells_provider: Optional[Callable[[], dict]] = None,
-                 themes_provider: Optional[Callable[[], list]] = None) -> None:
+                 themes_provider: Optional[Callable[[], list]] = None,
+                 janitor: Optional["CacheJanitor"] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("设置")
         self.s = s or Settings.instance()
@@ -424,6 +500,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self._cells_provider = cells_provider
         # 插件主题清单也由主窗给（对话框不碰插件管理器）：空/异常就是“没有插件主题”
         self._themes_provider = themes_provider
+        # 缓存清理与主窗共用一个后台 worker（没有就自己建一个）
+        self._janitor = janitor or CacheJanitor(self)
+        self._janitor.done.connect(self._on_cache_cleaned)
         self.setObjectName("SettingsDialog")
         self._widgets: dict[str, QtWidgets.QWidget] = {}
         self._color_btns: dict[str, QtWidgets.QPushButton] = {}
@@ -791,6 +870,65 @@ class SettingsDialog(QtWidgets.QDialog):
         row2.addWidget(self.lbl_cache, 1)
         form_cache.addRow("", self._wrap(row2))
 
+        # --- 自动清理（整组只占两行，避开小屏上把整页顶出屏幕）
+        row3 = QtWidgets.QHBoxLayout()
+        chk = QtWidgets.QCheckBox("自动清理缓存")
+        chk.setToolTip("开启后按右面的策略自动执行，不需要手动点。\n"
+                       "每次启动程序时检查一次；改策略时也会立即检查。")
+        chk.setChecked(bool(self.s.get("cache_auto_clean")))
+        chk.toggled.connect(lambda v: self.s.set("cache_auto_clean", bool(v)))
+        self._widgets["cache_auto_clean"] = chk
+        self.cb_cache_policy = QtWidgets.QComboBox()
+        for code, label in _cache.POLICIES.items():
+            self.cb_cache_policy.addItem(label, code)
+        want = str(self.s.get("cache_clean_policy"))
+        codes = list(_cache.POLICIES)
+        self.cb_cache_policy.setCurrentIndex(codes.index(want) if want in codes else 0)
+        # 下拉项文案长（“超过 1 GB 清理一次”），别让它按内容把整页撑宽
+        self.cb_cache_policy.setMinimumWidth(150)
+        self.cb_cache_policy.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.cb_cache_policy.setMinimumContentsLength(12)
+        self.cb_cache_policy.setToolTip(
+            "每 7 / 3 天：每隔 N 天清一次，删掉 N 天没用过的缓存（不会白删刚看过的）。\n"
+            "超过 1 GB：每次启动看一眼，超了就从最久没用过的开始删到 1 GB 以下。")
+        self._widgets["cache_clean_policy"] = self.cb_cache_policy
+        self.sp_cache_days = QtWidgets.QSpinBox()
+        self.sp_cache_days.setRange(0, 365)
+        self.sp_cache_days.setSuffix(" 天")
+        self.sp_cache_days.setValue(int(self.s.get("cache_custom_days")))
+        self.sp_cache_days.setToolTip("自定义：超过这么多天没用过的缓存会被删（0 = 不看天数）")
+        self.sp_cache_days.setMaximumWidth(92)
+        self.sp_cache_mb = QtWidgets.QSpinBox()
+        self.sp_cache_mb.setRange(0, 1024 * 1024)
+        self.sp_cache_mb.setSuffix(" MB")
+        self.sp_cache_mb.setSingleStep(128)
+        self.sp_cache_mb.setValue(int(self.s.get("cache_custom_mb")))
+        self.sp_cache_mb.setToolTip("自定义：总占用超过这个值时从最久没用过的开始删（0 = 不看容量）")
+        self.sp_cache_mb.setMaximumWidth(104)
+        self._widgets["cache_custom_days"] = self.sp_cache_days
+        self._widgets["cache_custom_mb"] = self.sp_cache_mb
+        self.btn_cache_now = QtWidgets.QPushButton("立即清理")
+        self.btn_cache_now.setToolTip("不等触发条件，现在就跑一次（删除条件仍按当前策略）")
+        row2.addWidget(self.btn_cache_now, 0)      # 与“清除解析缓存”放同一行，省高度
+        row3.addWidget(chk)
+        row3.addSpacing(8)
+        row3.addWidget(self.cb_cache_policy, 3)
+        row3.addWidget(self.sp_cache_days)
+        row3.addWidget(self.sp_cache_mb)
+        row3.addStretch(1)
+        form_cache.addRow("自动清理", self._wrap(row3))
+
+        self.lbl_clean = QtWidgets.QLabel("")
+        self.lbl_clean.setToolTip("开启后：启动程序时按策略检查一次；触发条件与上次清理时间见这里")
+        self.lbl_clean.setStyleSheet(f"color:{theme.readable_on(self.lbl_clean, '#8a8f98')};")
+        form_cache.addRow("", self.lbl_clean)
+        self.cb_cache_policy.currentIndexChanged.connect(self._on_cache_policy_changed)
+        self.sp_cache_days.valueChanged.connect(self._on_cache_policy_changed)
+        self.sp_cache_mb.valueChanged.connect(self._on_cache_policy_changed)
+        self.btn_cache_now.clicked.connect(lambda: self._run_cache_clean(force=True))
+        chk.toggled.connect(self._on_cache_policy_changed)
+
         foot = QtWidgets.QHBoxLayout()
         btn_reset = QtWidgets.QPushButton("恢复默认")
         btn_reset.clicked.connect(self._reset)
@@ -802,6 +940,7 @@ class SettingsDialog(QtWidgets.QDialog):
         left.addStretch(1)
         right.addStretch(1)
         root.addLayout(foot)
+        self._sync_cache_controls()
         self._refresh_cache_size()
 
     def _add_bool(self, form: QtWidgets.QFormLayout, key: str, label: str, tip: str) -> None:
@@ -912,6 +1051,8 @@ class SettingsDialog(QtWidgets.QDialog):
                 w.setChecked(bool(v))
         if hasattr(self, "_mode_btns"):
             self._refresh_mode_colors()
+        if hasattr(self, "sp_cache_days"):
+            self._sync_cache_controls()
         self._refresh_cache_size()
 
     def _clear_cache(self) -> None:
@@ -931,17 +1072,87 @@ class SettingsDialog(QtWidgets.QDialog):
         except Exception:                                     # noqa: BLE001
             size = f"{b} B"
         self.lbl_cache.setText(f"已清除 {n} 个文件，释放 {size}")
+        self._refresh_cache_size()
+
+    # -- 自动清理 ---------------------------------------------------------- #
+    def _on_cache_policy_changed(self, *_args: Any) -> None:
+        """策略/开关变了：落盘 → 同步灰态 → 立即按新策略检查一次。"""
+        pol = str(self.cb_cache_policy.currentData() or "7d")
+        if str(self.s.get("cache_clean_policy")) != pol:
+            self.s.set("cache_clean_policy", pol)
+        if int(self.s.get("cache_custom_days")) != int(self.sp_cache_days.value()):
+            self.s.set("cache_custom_days", int(self.sp_cache_days.value()))
+        if int(self.s.get("cache_custom_mb")) != int(self.sp_cache_mb.value()):
+            self.s.set("cache_custom_mb", int(self.sp_cache_mb.value()))
+        self._sync_cache_controls()
+        self._refresh_cache_size()
+        if not bool(self.s.get("cache_auto_clean")):
+            return
+        self._run_cache_clean(force=False)
+
+    def _sync_cache_controls(self) -> None:
+        custom = str(self.s.get("cache_clean_policy")) == "custom"
+        self.sp_cache_days.setEnabled(custom)
+        self.sp_cache_mb.setEnabled(custom)
+
+    def _run_cache_clean(self, *, force: bool) -> None:
+        started = self._janitor.run_async(force=force)
+        if started:
+            self.lbl_clean.setText("正在清理…")
+
+    def _on_cache_cleaned(self, res: dict) -> None:
+        """后台清理跑完：重新统计占用，并把“删了多少”写回界面。"""
+        self._refresh_cache_size()
+        if not res:
+            self._refresh_clean_label()
+            return
+        if res.get("error"):
+            self.lbl_clean.setText(str(res["error"]))
+            return
+        n = int(res.get("removed_entries") or 0)
+        freed = int(res.get("freed") or 0)
+        try:
+            from apmlog.core.model import human_size
+            freed_text = human_size(float(freed))
+        except Exception:                                     # noqa: BLE001
+            freed_text = f"{freed} B"
+        if n:
+            self.lbl_clean.setText(f"已清理 {n} 项，释放 {freed_text}")
+        else:
+            self.lbl_clean.setText("本次无需清理（没有满足条件的缓存）")
+        self._refresh_clean_label(keep_status=True)
+
+    def _refresh_clean_label(self, keep_status: bool = False) -> None:
+        """自动清理状态：开没开、上次什么时候、下次看什么条件。"""
+        if keep_status and self.lbl_clean.text().startswith("已清理"):
+            status = self.lbl_clean.text()
+        else:
+            status = ""
+        if not bool(self.s.get("cache_auto_clean")):
+            self.lbl_clean.setText(status or "未开启（只在你点“立即”时清理）")
+            return
+        age, cap, interval = _cache.policy_conditions(self.s)
+        bits: list[str] = []
+        if interval:
+            bits.append(f"每 {interval:g} 天检查，删 {age:g} 天未使用的")
+        if cap:
+            bits.append(f"超过 {cap / _cache.MB:.0f} MB 时从最久没用的开始删")
+        last = float(self.s.get("cache_clean_last_ts") or 0.0)
+        when = "从未" if last <= 0 else time.strftime("%Y-%m-%d %H:%M", time.localtime(last))
+        tail = f"上次：{when}"
+        self.lbl_clean.setText(status or f"{('；'.join(bits) or '无条件')}｜{tail}")
 
     def _refresh_cache_size(self) -> None:
         root = cache_dir()
         try:
-            files = [f for f in root.rglob("*") if f.is_file()]
-            b = sum(int(f.stat().st_size) for f in files)
-        except OSError:
-            b = 0
+            usage = _cache.scan(root)
+            total, files, entries = usage.bytes, usage.files, usage.entries
+        except Exception:                                     # noqa: BLE001
+            total = files = entries = 0
         try:
             from apmlog.core.model import human_size
-            size = human_size(float(b))
+            size = human_size(float(total))
         except Exception:                                     # noqa: BLE001
-            size = f"{b} B"
-        self.lbl_cache.setText(f"当前占用 {size}")
+            size = f"{total} B"
+        self.lbl_cache.setText(f"当前占用 {size}（{entries} 份缓存 / {files} 个文件）")
+        self._refresh_clean_label()

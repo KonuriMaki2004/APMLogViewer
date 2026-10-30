@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import random
 import socket
+import struct
 import threading
 import time
 from dataclasses import dataclass, field
@@ -130,7 +131,10 @@ class FakeFC:
                  mute_list: bool = False, mute_data: bool = False,
                  statustext: tuple[str, ...] = (),
                  params: Optional[dict[str, float]] = None,
-                 answer_params: bool = True) -> None:
+                 answer_params: bool = True,
+                 armed: bool = False,
+                 msd_supported: bool = True,
+                 files: Optional[dict[str, bytes]] = None) -> None:
         self.logs: list[FakeLog] = []
         for item in logs:
             if isinstance(item, FakeLog):
@@ -164,6 +168,16 @@ class FakeFC:
         self.rng = random.Random(seed)
         self.stats = FakeFCStats()
         self.request_log: list[tuple[str, Any]] = []
+        # ── U 盘模式（MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN param1=5）与 MAVFTP 虚拟机 ──
+        self.armed = bool(armed)               # 心跳里的 armed 位
+        self.msd_supported = bool(msd_supported)   # False → 回 MAV_RESULT_UNSUPPORTED
+        self.msd_entered = False                   # 收到并“接受”后才置 True
+        self.commands: list[tuple[int, tuple[float, ...]]] = []   # 收到的 COMMAND_LONG
+        self.files: dict[str, bytes] = dict(files or {})          # MAVFTP 虚拟文件系统
+        self.ftp_sessions: dict[int, tuple[str, int]] = {}        # session → (path, offset)
+        self._next_ftp_session = 1
+        self._ftp_seq = 0                 # 应答包序（真机是逐包递增）
+        self.ftp_ops: list[int] = []
 
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -314,8 +328,10 @@ class FakeFC:
                 if now - last_hb >= self.heartbeat_period:
                     last_hb = now
                     try:
+                        # base_mode 里的 0x80 = MAV_MODE_FLAG_SAFETY_ARMED，
+                        # 与 HeartbeatInfo.armed 的判定保持一致
                         mav.heartbeat_send(D.MAV_TYPE_QUADROTOR, D.MAV_AUTOPILOT_ARDUPILOTMEGA,
-                                           0, 0, D.MAV_STATE_ACTIVE, 3)
+                                           0x80 if self.armed else 0, 0, D.MAV_STATE_ACTIVE, 3)
                         self.stats.heartbeats += 1
                     except LinkError as exc:
                         # UDP 还没学到对端地址时属正常现象，等 GCS 先发一个包
@@ -361,8 +377,154 @@ class FakeFC:
                 self._handle_param_read(mav, m)
             elif name == "PARAM_SET":
                 self._record_param_write(m)
+            elif name == "COMMAND_LONG":
+                self._handle_command_long(mav, m)
+            elif name == "FILE_TRANSFER_PROTOCOL":
+                self._handle_ftp(mav, m)
 
-    # ------------------------------------------------------------------ 参数往返
+    # ------------------------------------------------------------------ 指令往返
+    def _handle_command_long(self, mav: D.MAVLink, m: Any) -> None:
+        """``COMMAND_LONG``：只实现预检重启（246），按 armed / 支持位回 ACK。
+
+        ``param1=5`` = ``REBOOT_TO_MASS_STORAGE``：
+        * 已解锁 → ``MAV_RESULT_FAILED``（与上游 ``GCS_Common.cpp`` 一致）
+        * 已声明不支持 → ``MAV_RESULT_UNSUPPORTED``
+        * 其余 → ``MAV_RESULT_ACCEPTED`` 并置 ``msd_entered``
+        """
+        from .ftp import (MAV_RESULT_ACCEPTED, MAV_RESULT_FAILED,
+                          MAV_RESULT_UNSUPPORTED, REBOOT_SHUTDOWN_ACTION_REBOOT_TO_MASS_STORAGE)
+        cmd = int(m.command)
+        params = (float(m.param1), float(m.param2), float(m.param3), float(m.param4),
+                  float(m.param5), float(m.param6), float(m.param7))
+        with self._lock:
+            self.commands.append((cmd, params))
+            self.request_log.append(("COMMAND_LONG", (cmd, params)))
+        if cmd != 246:
+            result = MAV_RESULT_UNSUPPORTED
+        elif abs(params[0] - float(REBOOT_SHUTDOWN_ACTION_REBOOT_TO_MASS_STORAGE)) < 1e-6:
+            if self.armed:
+                result = MAV_RESULT_FAILED
+            elif not self.msd_supported:
+                result = MAV_RESULT_UNSUPPORTED
+            else:
+                result = MAV_RESULT_ACCEPTED
+                self.msd_entered = True
+        else:
+            result = MAV_RESULT_ACCEPTED
+        try:
+            mav.command_ack_send(cmd, int(result))
+        except LinkError as exc:                       # pragma: no cover
+            log.debug("FakeFC COMMAND_ACK 发送失败: %s", exc)
+
+    # ------------------------------------------------------------------ MAVFTP
+    def _ftp_reply(self, mav: D.MAVLink, seq: int, session: int, opcode: int,
+                   data: bytes = b"", offset: int = 0, burst_complete: bool = False,
+                   req_opcode: int = 0) -> None:
+        """按上游 ``GCS_FTP`` 的真实格式回包：``<HBBBBBBI`` + 最多 239 字节数据。"""
+        from .ftp import DATA_OFF, HDR_FMT, PAYLOAD_LEN
+        payload = bytearray(PAYLOAD_LEN)
+        struct.pack_into(HDR_FMT, payload, 0, int(seq) & 0xFFFF, int(session) & 0xFF,
+                         int(opcode) & 0xFF, len(data), int(req_opcode) & 0xFF,
+                         1 if burst_complete else 0, 0, int(offset) & 0xFFFFFFFF)
+        payload[DATA_OFF:DATA_OFF + len(data)] = data
+        try:
+            mav.file_transfer_protocol_send(0, self.sysid, self.compid, bytes(payload))
+        except LinkError as exc:                       # pragma: no cover
+            log.debug("FakeFC FILE_TRANSFER_PROTOCOL 发送失败: %s", exc)
+
+    def _ftp_nack(self, mav: D.MAVLink, seq: int, session: int, req_opcode: int,
+                  code: int) -> None:
+        from .ftp import OP_NAK
+        self._ftp_reply(mav, seq, session, OP_NAK, bytes([int(code) & 0xFF]),
+                        req_opcode=req_opcode)
+
+    def _handle_ftp(self, mav: D.MAVLink, m: Any) -> None:
+        """MAVFTP：在内存虚拟文件系统上实现只读的几个操作码（真机同款格式）。"""
+        from .ftp import (DATA_OFF, MAX_DATA, OP_ACK, OP_BURST_READ_FILE,
+                          OP_LIST_DIRECTORY, OP_OPEN_FILE_RO, OP_READ_FILE,
+                          OP_TERMINATE_SESSION, HDR_FMT)
+        p = bytes(m.payload)
+        if len(p) < DATA_OFF:
+            return
+        seq, sess, opcode, size, _req, _burst, _pad, offset = struct.unpack_from(HDR_FMT, p, 0)
+        data = p[DATA_OFF:DATA_OFF + int(size)]
+        with self._lock:
+            self.ftp_ops.append(int(opcode))
+            # 与真机一致：应答的 seq 逐包递增，不是回填请求的 seq
+            base_seq = (self._ftp_seq + 1) & 0xFFFF
+            self._ftp_seq = base_seq
+        if opcode == OP_OPEN_FILE_RO:
+            path = data.split(b"\x00")[0].decode("utf-8", "replace")
+            blob = self.files.get(path)
+            if blob is None:
+                self._ftp_nack(mav, base_seq, sess, OP_OPEN_FILE_RO, 10)   # FileNotFound
+                return
+            with self._lock:
+                sid = self._next_ftp_session
+                self._next_ftp_session = (self._next_ftp_session % 254) + 1
+                self.ftp_sessions[sid] = (path, 0)
+            self._ftp_reply(mav, base_seq, sid, OP_ACK,
+                            struct.pack("<I", len(blob)), req_opcode=OP_OPEN_FILE_RO)
+            return
+        if opcode in (OP_READ_FILE, OP_BURST_READ_FILE):
+            with self._lock:
+                entry = self.ftp_sessions.get(sess)
+            if entry is None:
+                self._ftp_nack(mav, base_seq, sess, opcode, 4)              # InvalidSession
+                return
+            blob = self.files.get(entry[0], b"")
+            # 读请求的头 size 字段 = 客户端想要的字节数；真机也是这么算的
+            want = max(1, min(MAX_DATA, int(size) or MAX_DATA))
+            if opcode == OP_READ_FILE:
+                chunk = blob[offset:offset + want]
+                self._ftp_reply(mav, base_seq, sess, OP_ACK, chunk, offset=offset,
+                                burst_complete=True, req_opcode=OP_READ_FILE)
+                return
+            pos = int(offset)
+            limit = 16 * 1024                       # 模拟真实 burst：一次最多回这么多
+            seq_i = base_seq
+            while pos < len(blob) and (pos - int(offset)) < limit:
+                chunk = blob[pos:pos + want]
+                if not chunk:
+                    break
+                done = pos - int(offset) + len(chunk)
+                last = (pos + len(chunk) >= len(blob)) or (done >= limit)
+                self._ftp_reply(mav, seq_i, sess, OP_ACK, chunk, offset=pos,
+                                burst_complete=last, req_opcode=OP_BURST_READ_FILE)
+                pos += len(chunk)
+                seq_i = (seq_i + 1) & 0xFFFF
+            if seq_i != base_seq:
+                with self._lock:
+                    self._ftp_seq = (seq_i - 1) & 0xFFFF
+            return
+        if opcode == OP_TERMINATE_SESSION:
+            with self._lock:
+                self.ftp_sessions.pop(sess, None)
+            self._ftp_reply(mav, base_seq, sess, OP_ACK, req_opcode=OP_TERMINATE_SESSION)
+            return
+        if opcode == OP_LIST_DIRECTORY:
+            path = data.split(b"\x00")[0].decode("utf-8", "replace")
+            prefix = path.rstrip("/") + "/"
+            entries: list[str] = []
+            seen: set[str] = set()
+            for fp in sorted(self.files):
+                if not fp.startswith(prefix):
+                    continue
+                rest = fp[len(prefix):]
+                if "/" in rest:
+                    d = rest.split("/")[0]
+                    if d not in seen:
+                        seen.add(d)
+                        entries.append(f"D{d}\t0")
+                else:
+                    entries.append(f"F{rest}\t{len(self.files[fp])}")
+            blob = b"".join(e.encode("utf-8") + b"\x00" for e in entries)
+            page = blob[int(offset):int(offset) + MAX_DATA]
+            self._ftp_reply(mav, base_seq, sess, OP_ACK, page, offset=int(offset),
+                            req_opcode=OP_LIST_DIRECTORY)
+            return
+        self._ftp_nack(mav, base_seq, sess, opcode, 7)                       # UnknownCommand
+
     def _handle_param_read(self, mav: D.MAVLink, m: Any) -> None:
         """``PARAM_REQUEST_READ``：param_index=-1 走按名查，否则走按序查。
 

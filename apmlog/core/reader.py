@@ -57,6 +57,64 @@ SPECIAL_TYPES: frozenset[str] = frozenset({"FMT", "FMT2", "FMTU", "UNIT", "PARM"
 #: 事件类型
 EVENT_TYPES: tuple[str, ...] = ("ERR", "EV", "MSG", "MSGB", "MSGT", "MSGS", "ARM", "MODE", "CMD", "FILE")
 
+#: 走完整 ``to_dict()`` 的类型：特殊报文与事件报文（数量少，但需要字符串字段）。
+#: 其余类型走 _numeric_plan() 快路径，直接从 pymavlink 已解好的 _elements 取数。
+_SLOW_TYPES: frozenset[str] = frozenset(SPECIAL_TYPES) | frozenset(EVENT_TYPES)
+
+
+def _numeric_plan(m: Any) -> tuple[tuple[str, ...], tuple[int, ...], tuple[Any, ...],
+                                  tuple[Any, ...], tuple[tuple[str, int, Any, Any], ...]]:
+    """按 FMT 预算“哪些列是数值、下标多少、要不要转类型/乘倍数”。
+
+    与 pymavlink ``DFMessage.__getattr__`` 语义一致：
+    字符串列跳过；``format=='M'`` 且不应用倍数时不做类型转换；倍数小于 1 时用除法。
+    返回值末项是实例号列的取数计划（I/Inst/C/IMU 这些列本身不入库，但要用来判实例）。
+    """
+    fmt = m.fmt
+    apply_mult = bool(getattr(m, "_apply_multiplier", True))
+    names: list[str] = []
+    idxs: list[int] = []
+    convs: list[Any] = []
+    mults: list[Any] = []
+    for i, c in enumerate(fmt.columns):
+        if c in _INST_COLS:
+            continue
+        if fmt.msg_types[i] is str:
+            continue
+        names.append(c)
+        idxs.append(i)
+        convs.append(None if (fmt.format[i] == "M" and not apply_mult) else fmt.msg_types[i])
+        mults.append(fmt.msg_mults[i] if apply_mult else None)
+    colhash = getattr(fmt, "colhash", {}) or {}
+    inst_plan: list[tuple[str, int, Any, Any]] = []
+    for f in INST_FIELDS:
+        i = colhash.get(f)
+        if i is None or fmt.msg_types[i] is str:
+            continue
+        inst_plan.append((f, int(i),
+                          None if (fmt.format[i] == "M" and not apply_mult) else fmt.msg_types[i],
+                          fmt.msg_mults[i] if apply_mult else None))
+    return (tuple(names), tuple(idxs), tuple(convs), tuple(mults), tuple(inst_plan))
+
+
+def _instance_of_plan(els: Any, plan: tuple[tuple[str, int, Any, Any], ...]) -> int:
+    """用 plan 里的实例列算实例号（与 ``_instance_of`` 同语义：整数 0..63）。"""
+    for _f, i, conv, mul in plan:
+        try:
+            v = els[i]
+            if conv is not None:
+                v = conv(v)
+            if mul is not None:
+                v = v / (1.0 / mul) if 0 < mul < 1 else v * mul
+            fv = float(v)
+        except Exception:
+            continue
+        iv = int(fv)
+        if 0 <= iv < 64 and fv == iv:
+            return iv
+    return -1
+
+
 #: 轨迹源优先级（**主轨迹**选取顺序：光标/高度带/里程/状态栏跟着它走）。
 TRACK_PRIORITY: tuple[str, ...] = ("POS", "GPS", "XKF1", "VISP")
 
@@ -145,6 +203,29 @@ def cache_dir_for(path: str | Path) -> tuple[Path, str]:
     p = Path(path)
     _size, _mtime, log_id = _fingerprint(p)
     return cache_root() / log_id, log_id
+
+
+def touch_cache(path: str | Path) -> bool:
+    """把这份日志的解析缓存标记为“刚用过”。
+
+    为什么要它：自动清理按“最后使用时间”判冷缓存，而**命中缓存**时我们并不重写
+    缓存文件，mtime 会一直停在上次解析的时刻——一份天天打开、但缓存一直有效的日志，
+    会被误判成冷缓存删掉。这里只改缓存目录里 ``index.json`` 的时间，不动日志本身，
+    也不影响 :func:`is_fresh`（它比的是**日志文件**的大小/mtime）。
+    """
+    try:
+        cdir, _log_id = cache_dir_for(path)
+    except OSError:
+        return False
+    ip = cdir / "index.json"
+    if not ip.exists():
+        return False
+    now = time.time()
+    try:
+        os.utime(ip, (now, now))
+    except OSError:
+        return False
+    return True
 
 
 def is_fresh(path: str | Path, index: dict[str, Any]) -> bool:
@@ -238,6 +319,7 @@ def build(path: str | Path, progress: ProgressFn = None, force: bool = False) ->
         raise ParseError(f"不是有效的 DataFlash .BIN 或格式不受支持: {p}")
 
     bufs: dict[str, _Buf] = {}
+    plans: dict[str, tuple[Any, ...]] = {}
     raw_events: list[dict[str, Any]] = []
     params: list[dict[str, Any]] = []
     ver: dict[str, Any] = {}
@@ -269,11 +351,40 @@ def build(path: str | Path, progress: ProgressFn = None, force: bool = False) ->
             break
         n_msg += 1
         name = m.get_type()
-        try:
-            d = m.to_dict()
-        except Exception:
-            continue
-        raw_t = d.get("TimeUS")
+        # 快路径（2026-10-29 性能修复）：绝大多数报文（ATT/IMU/VIBE/XKF1/BAT…）只需要
+        # 数值列 + TimeUS + 实例号。以前对 2.6M 条报文都调 to_dict() 再扫一遍字典，
+        # 光这两步就占 70 s。这里改为按 FMT 预先算好数值列的下标/转换/倍数，直接从
+        # pymavlink 已解好的 _elements 取值，语义与 DFMessage.__getattr__ 一致。
+        # 特殊类型（FMT/PARM/FILE/VER/UNIT…）与事件类型仍走 to_dict()，它们很少。
+        vals: Optional[dict[str, float]] = None
+        d: Optional[dict[str, Any]] = None
+        if name in _SLOW_TYPES:
+            try:
+                d = m.to_dict()
+            except Exception:
+                continue
+            raw_t = d.get("TimeUS")
+        else:
+            plan = plans.get(name)
+            if plan is None:
+                plan = plans[name] = _numeric_plan(m)
+            pnames, pidx, pconv, pmult, pinst = plan
+            els = m._elements
+            vals = {}
+            for k, i, conv, mul in zip(pnames, pidx, pconv, pmult):
+                try:
+                    v = els[i]
+                    if conv is not None:
+                        v = conv(v)
+                    if mul is not None:
+                        if 0 < mul < 1:
+                            v = v / (1.0 / mul)
+                        else:
+                            v = v * mul
+                    vals[k] = float(v)
+                except Exception:
+                    vals[k] = NAN
+            raw_t = vals.get("TimeUS")
         if isinstance(raw_t, (int, float)) and not isinstance(raw_t, bool):
             raw_us = int(raw_t)
             if prev_raw is not None and raw_us < prev_raw - 1_000_000:
@@ -330,10 +441,12 @@ def build(path: str | Path, progress: ProgressFn = None, force: bool = False) ->
 
         if name not in bufs:
             bufs[name] = _Buf()
-        vals = _numeric_scalars(d)
-        bufs[name].add_row(tc, t, _instance_of(d), seg, vals)
+        if vals is None:
+            vals = _numeric_scalars(d)
+        inst = _instance_of(d) if d is not None else _instance_of_plan(m._elements, pinst)
+        bufs[name].add_row(tc, t, inst, seg, vals)
 
-        if name in EVENT_TYPES:
+        if name in EVENT_TYPES and d is not None:
             r = evmod.raw_from_message(name, d, tc)
             if r is not None:
                 raw_events.append(r)

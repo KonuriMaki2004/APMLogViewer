@@ -1080,3 +1080,227 @@ ctx.register_theme(ThemeSpec(id="midnight", name="午夜蓝",
 当前各页最小宽（1600×950，真实日志，含第三方插件）：轨迹地图 70、曲线 906、
 告警 70、事件 70、参数 400、插件页 22。其中**曲线页的 906 是设计成本**
 （预设框 + 4 个按钮 + 每道最小高 + 叠加绘制），它决定了左侧栏能拉多宽的上限。
+
+---
+
+## 30. 100 MB 级日志的性能预算（2026-10-29）
+
+真实样本：`2026-10-29 14-18-00.bin`（103.6 MB，2,619,459 条消息，Copter 4.6.3 机载日志）。
+下表是**上限**，后续改动不许回退。测量脚本：`tools/_perf_100mb.py`、`tools/_perf_profile.py`、
+`tools/_perf_gui.py`。
+
+| 动作 | 预算 | 实测（修前 → 修后） |
+| --- | --- | --- |
+| 首次加载（冷，无缓存） | ≤ 60 s | 88.3 s → **44.7 s** |
+| 再次加载（有缓存） | ≤ 3 s | **1.37～1.8 s** |
+| 切到事件 / 告警页 | ≤ 100 ms | 4.35 s → **0.01 s** |
+| 切到曲线页首绘 | ≤ 1 s | **0.5 s** |
+| 滚轮缩放最坏一步 | ≤ 200 ms | 1.59 s → **0.14 s** |
+| 时间线拖动（连拖 20 次） | 单帧 ≤ 60 ms | **59 ms 最坏 / 合计 0.94 s** |
+| 进程常驻内存（载入后） | ≤ 3× 日志 | **233 MB**（再开曲线页 242 MB） |
+
+实现约定（违反任一条，上面这些数字就会打回去）：
+
+1. **解析快路径**：`reader.build()` 只对 `SPECIAL_TYPES ∪ EVENT_TYPES` 调 `to_dict()`；
+   其余类型走 `FMT` 预编译的 `_numeric_plan()`（列名→列号→转换→乘子→实例判定），
+   不逐条建字典。快路径产出必须与旧实现**逐字节一致**——64 种消息类型的数组、
+   `index.json` 里的 stats/types/params/events 都逐项比对过。
+2. **事件标记不许一条一个图元**：每个 lane 用一个 `_EventStrips(QGraphicsObject)`，
+   `paint()` 里只画可视区间内的事件。3300+ 个 `InfiniteLine` 正是 1.59 s 的来源。
+3. **缩放后的重采样要真去抖**：`_refine_view()` 只负责
+   `_refine_timer.start(refine_debounce_ms)`，真正的重取数在 `_run_refine()`。
+   设置项写了不生效等于没写。
+4. **切页只做便宜的那部分**：`tabs.currentChanged` → `_apply(keep_window=True, cheap=True)`，
+   用 `(preset, id(store), win, len(events), len(alerts), extra, groups)` 指纹跳过重复构建。
+5. **采样点数按像素算**：`nb = min(2000, max(400, int(wpx)))`，不按数据点算。
+
+---
+
+## 31. 日志搬运的两条通道：U 盘模式 + MAVFTP（2026-10-29）
+
+> **真机未验证。** 本节的链路行为全部在 `apmlog.link.fakes.FakeFC` 回环上验证
+> （假飞控按上游 `GCS_Common.cpp` / `GCS_FTP.cpp` 的语义实现，含 `armed` 拒绝、
+> `!request_usb_msd()` 回 UNSUPPORTED、burst 读）。手上没有可用飞控，
+> 所以“真机验证”一栏为空 —— 对外文案不许写成已验证。
+
+### 31.1 U 盘模式（本工程唯一一条会改变飞控状态的命令）
+
+* 报文：`COMMAND_LONG`(76)，`command=246 MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN`，`param1=5`
+  （`REBOOT_SHUTDOWN_ACTION_REBOOT_TO_MASS_STORAGE`），`param2..7=0`，`confirmation=0`。
+  常量来自 `apmlog.link.ftp`，并由 `test_pymavlink_agrees_with_our_constants` 与
+  pymavlink 的 dialect 对齐（防手抄错）。
+* 护栏（顺序不能换）：
+  1. **armed 检查在发命令之前**：`MavLinkSession.is_armed()` 为真 → 只发失败信号，
+     链路上一条命令都不出现（`test_armed_is_blocked_and_sends_nothing` 断言
+     `FakeFC.commands == []`）。
+  2. **二次确认四要素**：会重启进 U 盘模式 / 日志在 `APM/LOGS` / 拷完要安全弹出再断电重启 /
+     U 盘模式下不能飞也不能改参数；默认按钮是「取消」。
+  3. 取消 → 不下发（`test_cancel_confirm_sends_nothing`）。
+* ACK 映射：`0 ACCEPTED` → 成功（提示等盘符）；`3 UNSUPPORTED` → 明确说“固件没编进这个功能”；
+  `4 FAILED` → 失败；**6 s 内没有 ACK 不当作失败**，报“可能已经重启”。
+* 结果提示永不为空：`_on_msd_result()` 两条分支都有正文（`test_result_message_is_never_blank`）。
+
+### 31.2 MAVFTP 只读下载（`FILE_TRANSFER_PROTOCOL` / 110）
+
+* 客户端 `apmlog.link.ftp.MavFtp`：`open_ro / read / burst_read / terminate / list_dir / fetch`。
+  载荷几何固定：`PAYLOAD_LEN=251`，数据从第 14 字节起，单包最多 `MAX_DATA=237` 字节。
+  burst 用同一 `seq` 连发多包，靠 `burst_complete` 收尾。
+* `fetch()` 先写 `*.part`，长度校验通过才改名；中途取消保留 `.part` 以便续。
+* 通道选择：`_LinkWorker.set_options(transport=…)`，取值 `auto / ftp / log`，
+  界面下拉持久化到 `settings.json` 的 `dl_transport`。
+  * `auto`：先走 MAVFTP；**任何** `MavFtpError` 或异常 → 打一条“回退”提示后走 `LOG_*`，
+    下载本身不会因此失败。
+  * `ftp`：不自动回退，失败直接报“MAVFTP 通道失败（未自动回退…）”。
+  * `log`：一条 `FILE_TRANSFER_PROTOCOL` 都不发（`test_log_channel_never_touches_ftp`
+    断言 `fc.ftp_ops == []`）。
+* 远端路径：`/APM/LOGS/{log_id+1:08d}.BIN`（ArduPilot 的 DataFlash 命名）。
+* 失败面：打不开 / 会话失效 / 读到空包都抛 `MavFtpError`；`fetch` 内按 `retries` 重试 burst。
+
+### 31.3 两条通道的实测
+
+同一份真实日志（31.0 MB）在两个通道各跑一遍，内容逐字节校验：
+
+| 通道 | 字节 | 耗时 | 吞吐 | 请求数 | 每次请求字节 | 校验 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `LOG_*` | 31,031,296 | 418.44 s | 0.07 MB/s | 2874 | 10,797 | OK |
+| MAVFTP | 31,031,296 | 36.14 s | 0.86 MB/s | 1871 | 16,585 | OK |
+
+参考日志全文（108,645,616 B）走 MAVFTP：126.11 s（0.86 MB/s，6549 次 burst 请求），校验一致。
+
+这些是 **本机回环**数字，反映“本端处理 + 协议请求次数”，不是真机链路带宽；
+真机上是 57600 波特（≈5.6 KB/s 理论上限）或 USB CDC，两者都远低于回环。
+可复现命令：`tools/_bench_channels.py "<日志>"`。
+
+---
+
+## 32. 真机验证与协议修正（2026-10-30，COM94）
+
+飞控：APM 固件，`sysid=1`，`AUTOPILOT_VERSION.capabilities=0x0000fbef`（**含 FTP 位**），
+`board_version=0x04cd0000`（board_id 1229），17 条日志，最大 1.15 MB。
+
+### 32.1 真机上才暴露的四条协议错误（已改）
+
+| # | 错误实现 | 真机事实（以 ``pymavlink/mavftp.py`` 为准） |
+| --- | --- | --- |
+| 1 | 把 `payload[0..2]` 当“目标地址前缀”，数据从第 14 字节起 | **整个 251 字节就是 FTP_OP**：`<HBBBBBBI` 头（seq 为 **uint16**），数据从 **第 12 字节**起，单包最大 **239** 字节。目标地址只在 MAVLink 消息头里 |
+| 2 | 应答按“opcode 等于请求 opcode”判 | 成功应答 `opcode=128(ACK)`，失败 `129(NAK)` 且 `payload[0]` 是错误码；burst 应答 `req_opcode` 回填 **15** |
+| 3 | 把 `session=0` 当失败 | ArduPilot 会话号**从 0 开始**，0 是合法会话 |
+| 4 | 读请求把“要多少字节”放进 4 字节 payload | 读/突发读的 **头部 `size` 字段就是想要的字节数**，payload 为空 |
+
+另外两条真实行为（决定客户端怎么写）：
+
+* **burst 的 seq 逐包递增**，不能用 `seq == 请求seq` 过滤；
+* **服务端会对正在跑的流继续往后突**，新请求的 `offset` 不一定马上生效。所以 `fetch`
+  分两阶段：先跟着流跑到文件尾（按 offset 就位、不要求连续），再回头补洞；
+  中途失败必须 `Terminate` + `ResetSessions`，否则残留流会把下一次请求直接顶成超时。
+* 日志路径：``LOG_ENTRY.id`` **就是**文件名编号——id=10 ↔ `/APM/LOGS/00000010.BIN`
+  （早期按 id+1 算，真机上“文件不存在”）。
+
+### 32.2 真机实测（同一份日志 id=10，1,148,993 B）
+
+| 通道 | 字节 | 耗时 | 吞吐 | 回退 | sha256 前 16 |
+| --- | --- | --- | --- | --- | --- |
+| MAVFTP | 1,148,993 | 14.10 s | **79.6 KB/s** | 否 | `3cd38458b2f22122` |
+| 自动（MAVFTP 故意打不开） | 1,148,993 | 19.76 s | 56.8 KB/s | **是** | `3cd38458b2f22122` |
+| `LOG_*` | 1,148,993 | 19.69 s | 57.0 KB/s | 否 | `3cd38458b2f22122` |
+
+三条通道内容**逐字节一致** → 通道只影响速度、不影响内容。MAVFTP 在这条 USB CDC 链路上
+比 `LOG_*` 快约 **1.4×**。可复现：`tools/_hw_channels.py COM94 [log_id]`。
+
+### 32.3 U 盘模式真机护栏（未触发重启）
+
+* armed 拦截：把 `is_armed()` 置真（真实链路、真实 worker）→ `ok=False`，提示“飞控处于解锁
+  （armed）状态，已拦截，未发送命令”，**tx 帧 2 → 2（差 0）**，即链路上一个包都没多发。
+* 二次确认：真实对话框抓文本，必备要素齐全（重启进 U 盘 / 日志在 APM/LOGS / 安全弹出后断电 /
+  不能飞不能改参），默认按钮是「取消」，`_confirm_msd()` 返回 False。
+  截图 `selftest/hw_msd_confirm.png`。
+* ACK 映射：0 已接受 / 3 不支持（固件没编进） / 4 失败 / 6 s 无 ACK → “可能已经重启”。
+* **未做**：真正发 `246/param1=5`。它会立刻重启进 MSD、断开 MAVLink，必须断电重启才回正常固件，
+  属于破坏性动作，留待用户确认后再做。可复现：`tools/_hw_msd.py COM94`。
+
+---
+
+## 33. 切页性能：只重建这一页需要的那部分（2026-10-30）
+
+103.6 MB 日志（`2026-10-29 14-18-00.bin`）实测。问题不是“切页”本身，而是切页会触发一次
+**全量 `_apply()`**，而 `_apply()` 里有三块重活无论变没变都重做：
+
+| 重活 | 单次成本 | 为什么错 |
+| --- | --- | --- |
+| 重建 5 条泳道（PlotItem + 坐标轴 + 胶囊） | 302 ms | 只是换了窗口，控件结构没变 |
+| 地图 2.6 M 点轨迹再推一遍 | 185 ms + 51 ms | 地图数据只跟日志有关，跟窗口无关 |
+| 160 个告警区间图元重建 | 105 ms | 告警集合没变 |
+| 重建期间触发 3 次整屏重绘 | ~150 ms | setData → 范围变化 → set_events 各触发一次 |
+
+改法（契约级约定）：
+
+1. **分域指纹**：`cheap=True`（切页）时不再推地图与时间线数据；它们只随日志/事件集合变。
+2. **泳道原地换数据**：`_lanes_signature()` 比通道集合/颜色/单位/阈值/band/叠加曲线，
+   一致就只 `lane.load()` 换数据，不拆控件；`hidden` 不进签名（用户勾选不被切页重置）。
+3. **事件/区间按签名去重**：内容一样就不重建 `_EventStrips` 与 `LinearRegionItem`。
+4. **重建期间关绘制**：`setUpdatesEnabled(False)` 包住整个 `set_lanes`，完事只画一次。
+5. **背景缓存**：`CacheBackground`（网格/坐标轴缓存），主题切换与重建时 `resetCachedContent()`。
+
+实测（offscreen，含 `grab()` 强制渲一遍）：
+
+| 场景 | 修前 | 修后 |
+| --- | --- | --- |
+| 第一次进「曲线」（强制重建） | 1411 ms | **563 ms** |
+| 第一次进「告警」/「事件」 | 845 / 841 ms | **258 / 258 ms** |
+| 第一次进「参数」 | 743 ms | **318 ms** |
+| 切页且窗口变了（地图缩放过） | 932 ms | **453 ms** |
+| 切页且窗口没变（纯切页） | ~0.4 ms 逻辑 | **~0.4 ms 逻辑** |
+| 页签渲染（软光栅） | 140–170 ms | 140–170 ms（Qt 侧，不属逻辑） |
+
+规则：**切页只重建这一页需要的那部分；能按签名跳过的重活一律跳过**；
+以后新增页面同样不能把“与窗口无关的数据”塞进 `cheap` 路径。
+
+---
+
+## 34. 解析缓存自动清理（2026-10-30）
+
+### 34.1 数据模型
+
+三个字段描述所有策略（预设只是它的三组取值）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `max_age_days` | 只删“最后使用时间早于 N 天”的缓存条目 |
+| `max_bytes` | 超出容量时按“最久没用过优先”删到阈值以下 |
+| `interval_days` | 每隔 N 天才执行一次（不是每天扫） |
+
+预设：`7d` = (7, -, 7)；`3d` = (3, -, 3)；`1g` = (-, 1 GiB, -)；
+`custom` = 用户自填天数/容量（0 = 该条件不启用）。
+
+### 34.2 清理粒度与安全边界
+
+1. **一份缓存 = 一个子目录**，整体删；只动 `cache/`，不碰同级的 `settings.json` / `views.json` / `link.json`。
+2. **“最后使用时间” = 最后一次读**，不是最后一次写：命中缓存时 `LogStore.open` 会调
+   `reader.touch_cache()` 刷一下 `index.json` 的 mtime。否则“天天打开、缓存一直有效”的日志
+   会被误判成冷缓存删掉（违反“只删冷缓存”这个原则）。touch 只改缓存文件，不动日志本身，
+   也不影响 `is_fresh()`（它比的是**日志文件**的大小/mtime）。
+3. **容量清理永远保留“最新一份”**：否则会出现“刚分析完的日志被自己清掉、下次还要重解析”。
+   只有一份且超限时也不删（宁可超一点）。
+4. 删不动的条目（被占用）跳过并记日志，不中断其他条目。
+
+### 34.3 触发时机（不用等用户手动）
+
+* **程序启动**：`QTimer.singleShot(0)` 在窗口出来之后检查一次；
+* **开着时的巡检**：每 30 分钟看一次（未到间隔时 `run_if_due` 直接跳过）；
+* **改策略/开开关**：设置页立即按新策略检查一次；
+* **手动**：“立即清理”按钮强制跑一次（删除条件仍按当前策略）。
+
+防重复：每次跑完写回 `cache_clean_last_ts`；间隔策略在同一时间段内只跑一次（重启也不重复清）。
+
+### 34.4 设置项（全部持久化到 settings.json）
+
+`cache_auto_clean`（默认 false）、`cache_clean_policy`（默认 `7d`）、
+`cache_custom_days`（默认 7）、`cache_custom_mb`（默认 1024）、
+`cache_clean_last_ts` / `cache_clean_last_freed`（运行时记账，界面显示用）。
+
+### 34.5 界面契约
+
+* 缓存分组必须显示 **当前占用（字节 + 份数/文件数）**；
+* 清理完成（后台线程回包）后必须**立即重算并刷新**占用与状态行；
+* “自定义”两个数字框只在该策略下可编，其他策略下置灰；
+* 仍遵守 §24：**设置页不能出现滑动条**。本改动只增加 1 行高（实测 sizeHint 842 → 855 px）。

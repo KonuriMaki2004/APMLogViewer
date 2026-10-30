@@ -135,6 +135,9 @@ class LogStore:
                     loaded = None
                 if loaded is not None and _rd.is_fresh(p, loaded):
                     index = loaded
+                    # 命中缓存 = 真正“用过”一次：刷新它的最后使用时间，
+                    # 否则“天天打开但从不重解析”的日志会被自动清理当成冷缓存删掉。
+                    _rd.touch_cache(p)
                 elif loaded is not None:
                     log.info("缓存过期（结构版本/路径/大小/修改时间不一致），重建")
             if index is None:

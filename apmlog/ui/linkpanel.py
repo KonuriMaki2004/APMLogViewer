@@ -39,6 +39,17 @@ from apmlog.ui.settings import Settings
 
 BAUDS = (9600, 19200, 38400, 57600, 115200, 230400, 921600, 1500000)
 
+#: 日志下载通道（label, 内部代码）。
+#: ``ftp`` 走 ``FILE_TRANSFER_PROTOCOL``(110) 的 MAVFTP；``log`` 是原来的
+#: ``LOG_REQUEST_DATA``（兼容性最好但慢）；``auto`` 先试 MAVFTP，任何失败都回退到 ``LOG_*``。
+TRANSPORTS: tuple[tuple[str, str], ...] = (
+    ("自动：先试 MAVFTP，失败回退 LOG_*", "auto"),
+    ("MAVFTP（FILE_TRANSFER_PROTOCOL）", "ftp"),
+    ("LOG_*（兼容模式，慢但最稳）", "log"),
+)
+#: U 盘模式下的日志目录（ArduPilot 把 DataFlash 日志写在这里）。
+FTP_LOG_DIR = "/APM/LOGS"
+
 #: 连接方式下拉（label, 内部代码）。代码与 parse_target 的协议头一致，manual 例外。
 MODES: tuple[tuple[str, str], ...] = (
     ("串口（COM / USB / 数传）", "serial"),
@@ -135,6 +146,8 @@ class _LinkWorker(QtCore.QThread):
     #: 日志写入设置检测结果（LogWriteConfig 或 None）。本面板对飞控只读，
     #: 检测结果只用于提示与给出手动处理方法，不存在任何写回通道。
     logconfig_ready = QtCore.Signal(object)
+    #: U 盘模式的结果：(是否成功受理, 给人看的说明)
+    msd_result = QtCore.Signal(bool, str)
 
     def __init__(self, parent: Optional[QtCore.QObject] = None) -> None:
         super().__init__(parent)
@@ -144,6 +157,7 @@ class _LinkWorker(QtCore.QThread):
         self.fc = None                                  # FakeFC（自测用）
         self._out_dir = str(dldl.default_download_dir())
         self._blocks = 120
+        self._transport = "auto"                        # auto / ftp / log
         self._known: list[RemoteLog] = []
         self._logcfg = None                             # 最近一次日志写入检测结果
         self._stop = False
@@ -155,9 +169,11 @@ class _LinkWorker(QtCore.QThread):
     def request_cancel(self) -> None:
         self._cancel.set()
 
-    def set_options(self, *, out_dir: str, blocks_per_request: int) -> None:
+    def set_options(self, *, out_dir: str, blocks_per_request: int,
+                    transport: str = "auto") -> None:
         self._out_dir = out_dir
         self._blocks = max(1, int(blocks_per_request))
+        self._transport = transport if transport in ("auto", "ftp", "log") else "auto"
 
     def quit(self) -> None:
         self._stop = True
@@ -189,6 +205,8 @@ class _LinkWorker(QtCore.QThread):
                         self._do_download(int(kw["log_id"]))
                     elif cmd == "probe":
                         self._do_probe()
+                    elif cmd == "mass_storage":
+                        self._do_mass_storage()
                     elif cmd == "fake":
                         self._do_fake(**kw)
                     elif cmd == "quit":
@@ -350,7 +368,20 @@ class _LinkWorker(QtCore.QThread):
             return
         self._cancel.clear()
         Path(self._out_dir).mkdir(parents=True, exist_ok=True)
-        self.note.emit(f"开始下载 log {log_id}（{entry.size} 字节，每请求 {self._blocks} 块）")
+        if self._transport in ("auto", "ftp"):
+            res = self._try_ftp(entry)
+            if res is not None:
+                self.download_done.emit(res)
+                self.note.emit(res.summary() if res.complete else f"未完成：{res.reason}")
+                return
+            if self._transport == "ftp":
+                self.download_done.emit(DownloadResult(
+                    log_id=log_id, path=None, expected_bytes=entry.size, written_bytes=0,
+                    complete=False, elapsed=0.0,
+                    reason="MAVFTP 通道失败（未自动回退，改成“自动”可回退到 LOG_*）"))
+                return
+            self.note.emit("MAVFTP 不可用，自动回退到 LOG_REQUEST_DATA（较慢但兼容性最好）")
+        self.note.emit(f"开始下载 log {log_id}（{entry.size} 字节，每请求 {self._blocks} 块，通道 LOG_*）")
         res: DownloadResult = dldl.download_log(
             self.sess, entry, self._out_dir, blocks_per_request=self._blocks,
             window=1, cancel=self._cancel.is_set,
@@ -360,6 +391,97 @@ class _LinkWorker(QtCore.QThread):
             self.note.emit(res.summary())
         else:
             self.note.emit(f"未完成：{res.reason}（断点已保留，可再次点击继续）")
+
+    # ------------------------------------------------------------------ MAVFTP 通道
+    def _ftp_remote_path(self, log_id: int) -> str:
+        """真实机上的日志路径。
+
+        实测（COM94，2026-10-30）：``LOG_ENTRY.id`` **就是**文件名编号，
+        id=10 ↔ ``/APM/LOGS/00000010.BIN``（早期按 id+1 写，真机上直接文件不存在）。
+        """
+        return f"{FTP_LOG_DIR}/{int(log_id):08d}.BIN"
+
+    def _try_ftp(self, entry: RemoteLog) -> Optional[DownloadResult]:
+        """尝试 MAVFTP 拉一份日志；成功返回结果，失败返回 ``None``（调用方决定是否回退）。"""
+        from apmlog.link.ftp import MavFtp, MavFtpError
+
+        if self.sess is None:
+            return None
+        path = self._ftp_remote_path(entry.log_id)
+        out = Path(self._out_dir) / f"{int(entry.log_id):08d}.BIN"
+        t0 = time.monotonic()
+        ftp = MavFtp(self.sess, timeout=3.0)
+        self.note.emit(f"MAVFTP：打开 {path}（{entry.size} 字节）")
+        try:
+            res = ftp.fetch(
+                path, out, cancel=self._cancel.is_set,
+                progress=lambda done, total, rate: self.progress.emit(
+                    int(done), int(total or entry.size), float(rate), "MAVFTP"),
+            )
+        except MavFtpError as exc:
+            self.note.emit(f"MAVFTP 失败：{exc}")
+            return None
+        except Exception as exc:                            # 线程里不把异常扔出去
+            log.debug("MAVFTP 异常", exc_info=True)
+            self.note.emit(f"MAVFTP 异常：{type(exc).__name__}: {exc}")
+            return None
+        elapsed = max(1e-6, time.monotonic() - t0)
+        ok = res["bytes"] == entry.size
+        return DownloadResult(
+            log_id=entry.log_id, path=str(out), expected_bytes=int(entry.size),
+            written_bytes=int(res["bytes"]), complete=ok, elapsed=elapsed,
+            blocks_ok=int(res["bytes"] // 237), bytes_per_sec=float(res["bytes"]) / elapsed,
+            reason="" if ok else f"字节数不符（{res['bytes']}/{entry.size}）",
+        )
+
+    # ------------------------------------------------------------------ U 盘模式
+    def _do_mass_storage(self) -> None:
+        """发 ``MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN``(246) / ``param1=5`` 请求进 U 盘模式。
+
+        这是本工程**唯一**一条会改变飞控状态的命令，所以：
+        1. 已解锁 → 直接拦截，一条命令也不发；
+        2. 发之前由 UI 弹二次确认（本方法只负责发和读 ACK）；
+        3. 没收到 ACK 不当成失败（飞控可能已经重启拔线），但要说清楚。
+        """
+        from apmlog.link.ftp import (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+                                     REBOOT_SHUTDOWN_ACTION_REBOOT_TO_MASS_STORAGE,
+                                     RESULT_ZH)
+
+        if self.sess is None:
+            self.msd_result.emit(False, "未连接飞控")
+            return
+        try:
+            armed = bool(self.sess.is_armed())
+        except Exception:                                   # pragma: no cover
+            armed = False
+        if armed:
+            self.note.emit("U 盘模式：飞控处于解锁状态，已拦截（未发送任何命令）")
+            self.msd_result.emit(False, "飞控处于解锁（armed）状态，已拦截，未发送命令。请先在地面站上锁。")
+            return
+        try:
+            self.sess.send_command_long(
+                MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+                [REBOOT_SHUTDOWN_ACTION_REBOOT_TO_MASS_STORAGE, 0, 0, 0, 0, 0, 0],
+            )
+        except Exception as exc:
+            self.msd_result.emit(False, f"发送命令失败：{type(exc).__name__}: {exc}")
+            return
+        self.note.emit("U 盘模式：命令已发出，等待 COMMAND_ACK …")
+        ack = self.sess.wait_for(
+            "COMMAND_ACK", timeout=6.0,
+            pred=lambda m: int(getattr(m, "command", -1)) == MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN)
+        if ack is None:
+            self.msd_result.emit(
+                True, "已发出请求，但 6 秒内没收到 COMMAND_ACK。\n"
+                      "飞控可能已经重启：看看有没有出现 U 盘盘符。")
+            return
+        result = int(getattr(ack, "result", -1))
+        if result == 0:
+            self.msd_result.emit(
+                True, "飞控已接受（MAV_RESULT_ACCEPTED），正在重启进 U 盘模式。\n"
+                      "几秒后会多出一个 U 盘，里面的 ``APM/LOGS`` 就是日志。")
+        else:
+            self.msd_result.emit(False, f"飞控拒绝：{RESULT_ZH.get(result, f'MAV_RESULT {result}')}")
 
     def set_known(self, logs: Iterable[RemoteLog]) -> None:
         self._known = list(logs)
@@ -416,6 +538,7 @@ class LinkPanel(QtWidgets.QWidget):
         self.worker.download_done.connect(self._on_done)
         self.worker.note.connect(self._on_note)
         self.worker.logconfig_ready.connect(self._on_logconfig)
+        self.worker.msd_result.connect(self._on_msd_result)
         self.worker.start()
 
         self._build(default_target)
@@ -564,6 +687,18 @@ class LinkPanel(QtWidgets.QWidget):
             "真机（Copter 4.6.3 / USB CDC）扫参：120 块 = 58 KB/s 且零重传零 CRC；\n"
             "20 块只有 14 KB/s；≥200 块出现重复帧与 CRC 错，因此上限限到 160。")
         dl.addWidget(self.sp_blocks)
+        dl.addWidget(QtWidgets.QLabel("下载通道"))
+        self.cb_transport = QtWidgets.QComboBox()
+        for label, code in TRANSPORTS:
+            self.cb_transport.addItem(label, code)
+        want = str(Settings.instance().get("dl_transport"))
+        codes = [code for _label, code in TRANSPORTS]
+        self.cb_transport.setCurrentIndex(codes.index(want) if want in codes else 0)
+        self.cb_transport.setToolTip(
+            "MAVFTP 每帧可回 237 字节且连续突发，同一条链路上通常比 LOG_* 快很多；\n"
+            "但需要飞控侧开了 MAVFTP（Copter 通常在跑）。\n"
+            "选“自动”时先试 MAVFTP，失败（超时/拒绝）就自动回退到 LOG_*，不会丢下载。")
+        dl.addWidget(self.cb_transport)
         self.btn_download = QtWidgets.QPushButton("下载选中日志")
         self.btn_download.setToolTip("先勾选多条再点：会按列表顺序依次下载，中途断开保留断点")
         dl.addWidget(self.btn_download)
@@ -590,8 +725,14 @@ class LinkPanel(QtWidgets.QWidget):
         btns = QtWidgets.QHBoxLayout()
         self.btn_cancel = QtWidgets.QPushButton("取消下载")
         self.btn_diag = QtWidgets.QPushButton("打印诊断")
+        self.btn_msd = QtWidgets.QPushButton("重启到 U 盘模式…")
+        self.btn_msd.setToolTip(
+            "发 MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN(246) param1=5，\n"
+            "让飞控重启成大容量存储（U 盘），适合大批量拷日志。\n"
+            "会二次确认；飞控已解锁时直接拦截、不发命令。")
         btns.addWidget(self.btn_cancel)
         btns.addWidget(self.btn_diag)
+        btns.addWidget(self.btn_msd)
         btns.addStretch(1)
         ll.addLayout(btns)
         root.addWidget(log_box, 2)
@@ -607,10 +748,13 @@ class LinkPanel(QtWidgets.QWidget):
         self.btn_browse.clicked.connect(self._on_browse)
         self.btn_diag.clicked.connect(self._on_diag)
         self.btn_demo.clicked.connect(self._on_demo)
+        self.btn_msd.clicked.connect(self._on_mass_storage)
         self.ed_dir.editingFinished.connect(self._sync_options)
         self.sp_blocks.valueChanged.connect(self._sync_options)
         # 块数是“工具偏好”而不是会话参数，存进设置，下次开窗就是它
         self.sp_blocks.valueChanged.connect(lambda v: Settings.instance().set("dl_blocks", int(v)))
+        # 下载通道也是工具偏好，存设置并同步给 worker
+        self.cb_transport.currentIndexChanged.connect(self._on_transport_changed)
         # 链路方式联动：换方式只换表单，目标串始细由控件拼出来
         self.cb_mode.currentIndexChanged.connect(self._mode_changed)
         self.btn_ports.clicked.connect(self._refresh_ports)
@@ -1157,7 +1301,55 @@ class LinkPanel(QtWidgets.QWidget):
     # ------------------------------------------------------------------ 内部小工具
     def _sync_options(self) -> None:
         self._out_dir = self.ed_dir.text().strip() or str(dldl.default_download_dir())
-        self.worker.set_options(out_dir=self._out_dir, blocks_per_request=self.sp_blocks.value())
+        self.worker.set_options(out_dir=self._out_dir, blocks_per_request=self.sp_blocks.value(),
+                                transport=self.current_transport())
+
+    # ------------------------------------------------------------ 通道 / U 盘模式
+    def current_transport(self) -> str:
+        """当前选中的下载通道（auto / ftp / log）。"""
+        code = self.cb_transport.currentData()
+        return str(code) if code in ("auto", "ftp", "log") else "auto"
+
+    def _on_transport_changed(self, _idx: int) -> None:
+        Settings.instance().set("dl_transport", self.current_transport())
+        self._sync_options()
+
+    def _confirm_msd(self) -> bool:
+        """二次确认：把后果写清楚，默认不通过（测试里可以整段替掉）。"""
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("重启到 U 盘模式？")
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setText("这会让飞控重启进入 <b>U 盘（大容量存储）模式</b>。")
+        box.setInformativeText(
+            "1) 飞控会立即重启、断开 MAVLink；不要在空中/任务执行中用。\n"
+            "2) 重启后电脑上会多出一个 U 盘，日志在 APM/LOGS，直接拷走。\n"
+            "3) 拷完先在系统里「安全弹出」，再给飞控断电重上电，才会回到正常固件。\n"
+            "4) U 盘模式下不能飞行、也不能改参数。\n\n"
+            "确认现在发送重启命令吗？")
+        yes = box.addButton("确认重启到 U 盘模式", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("取消", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(box.buttons()[-1])
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _on_mass_storage(self) -> None:
+        """U 盘模式按钮入口：先确认，再交给 worker（armed 拦截在 worker 里）。"""
+        if not self._link_up and self.worker.sess is None:
+            QtWidgets.QMessageBox.warning(self, "未连接", "先连接飞控，再请求 U 盘模式。")
+            return
+        if not self._confirm_msd():
+            self._append("已取消 U 盘模式（未发送任何命令）")
+            return
+        self._set_busy(True, "正在请求 U 盘模式…", op="mass_storage")
+        self.worker.post("mass_storage")
+
+    def _on_msd_result(self, ok: bool, message: str) -> None:
+        self._set_busy(False)
+        self._append(("U 盘模式：" if ok else "U 盘模式未生效：") + message.replace("\n", " "))
+        if ok:
+            QtWidgets.QMessageBox.information(self, "已请求进入 U 盘模式", message)
+        else:
+            QtWidgets.QMessageBox.warning(self, "U 盘模式未生效", message)
 
     def _set_row_state(self, log_id: int, text: str) -> None:
         self._row_state[int(log_id)] = text

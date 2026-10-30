@@ -39,8 +39,9 @@ from apmlog.ui.presets import PRESETS, PRESET_BY_ID, build_lanes
 from apmlog.ui.loading import LoadingOverlay
 from apmlog.ui.scandialog import ScanController
 from apmlog.ui.seriesplot import OVERLAY_COLORS, SEVERITY_CN, LaneSpec, SeriesPlot
-from apmlog.ui.settings import (Settings, SettingsDialog, apply_tip_font, hide_tip,
-                                install_tip_style, settings as get_settings, show_tip)
+from apmlog.ui.settings import (CacheJanitor, Settings, SettingsDialog, apply_tip_font,
+                                hide_tip, install_tip_style, settings as get_settings,
+                                show_tip)
 from apmlog.ui import modecolors as _modecolors
 from apmlog.ui import theme as ui_theme
 from apmlog.ui.overlaydialog import OverlayDialog
@@ -684,6 +685,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plugin_hosts: dict[Any, tuple[str, Any]] = {}
         self._last_mode = ""
         self._applying_theme = False
+        # 切页签不重建图的指纹（见 _apply(cheap=True)）
+        self._applied_fp: Any = None
+        # 缩放细化去抖（见 _refine_view/_run_refine）
+        self._refine_pending: Optional[tuple[float, float]] = None
+        self._refine_timer = QtCore.QTimer(self)
+        self._refine_timer.setSingleShot(True)
+        self._refine_timer.timeout.connect(self._run_refine)
+        # 解析缓存自动清理：后台线程跑，启动时就检查一次（开了自动清理才会真删）
+        self.cache_janitor = CacheJanitor(self)
+        self.cache_janitor.done.connect(self._on_cache_cleaned)
+        # 窗口先出来，再在事件循环里跑扫描/删除（设置里没开自动清理就直接返回）
+        QtCore.QTimer.singleShot(0, self._auto_clean_cache)
+        # 长时间开着也别忘了：每 30 分钟按同一套策略看一眼（未到间隔时 run_if_due 直接跳）
+        self._cache_timer = QtCore.QTimer(self)
+        self._cache_timer.setInterval(30 * 60 * 1000)
+        self._cache_timer.timeout.connect(self._auto_clean_cache)
+        self._cache_timer.start()
 
         self._build_widgets()
         self._build_layout()
@@ -913,7 +931,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.alert_table.helpRequested.connect(self._open_alert_help)
         self.event_table.seekRequested.connect(self._on_time)
         self.event_table.helpRequested.connect(self._open_event_help)
-        self.tabs.currentChanged.connect(lambda i: self._apply(keep_window=True) if i in (1, 2, 3, 4) else None)
+        self.tabs.currentChanged.connect(
+            lambda i: self._apply(keep_window=True, cheap=True) if i in (1, 2, 3, 4) else None)
 
     # ---------------- 文件 ----------------
     def _choose_file(self) -> None:
@@ -998,6 +1017,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.store = store
         self._win = None
         self._extra = []
+        self._applied_fp = None          # 新日志：切页签的指纹缓存必须失效
         s = store.stats
         self.setWindowTitle(f"APMLogViewer {__version__} —— {store.name}")
         self.log_list.set_current(store.path)
@@ -1115,10 +1135,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ---------------- 视图刷新 ----------------
     def _refine_view(self, t0: float, t1: float) -> None:
-        """滚轮放大后，把“只有包络”的道按当前视图回内核重新取一次数。
+        """滚轮/拖动停手一小会儿之后，再把“只有包络”的泳道回内核重取细节。
 
-        预设对大数据量通道只给整窗包络（几千桶），以前一放大就画不出东西，
-        表现为“曲线全不见了”。现在图表端保证不画空，这里再补上细节能看到。"""
+        以前是同步做：
+        103 MB 日志上每次缩放卡 0.58 s（每道一次全量 ``store.envelope``）。
+        现在只记下最新的窗口并启动去抖定时器，交互本身不被阻塞。
+        """
+        self._refine_pending = (float(t0), float(t1))
+        try:
+            delay = int(get_settings().get("refine_debounce_ms") or 350)
+        except Exception:                                   # noqa: BLE001
+            delay = 350
+        self._refine_timer.start(max(0, delay))
+
+    def _run_refine(self) -> None:
+        pend = self._refine_pending
+        if not pend:
+            return
+        self._refine_pending = None
+        t0, t1 = pend
         if self.store is None or not (math.isfinite(t0) and math.isfinite(t1)) or t1 <= t0:
             return
         try:
@@ -1152,8 +1187,41 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_settings(self) -> None:
         """设置对话框：里面改一项就落盘并即时生效，不用重启。"""
         dlg = SettingsDialog(self, cells_provider=self.cells_info,
-                             themes_provider=self.plugins.themes_available)
+                             themes_provider=self.plugins.themes_available,
+                             janitor=self.cache_janitor)
         dlg.exec()
+
+    # ---------------- 解析缓存 ----------------
+
+    def _auto_clean_cache(self) -> None:
+        """启动时按设置检查一次缓存（不弹窗、不阻塞界面）。
+
+        真正的删除在 :class:`CacheJanitor` 的线程里做；没开自动清理时
+        ``run_if_due`` 直接返回 ``None``，这里一包都不建线程。
+        """
+        try:
+            enabled = bool(get_settings().get("cache_auto_clean"))
+        except Exception:                                  # noqa: BLE001
+            return
+        if not enabled:
+            return
+        if self.cache_janitor.run_async():
+            self.set_status("正在按设置检查解析缓存…")
+
+    def _on_cache_cleaned(self, res: dict) -> None:
+        """后台清理回包：只在真的删了东西时占一行状态栏。"""
+        if not res or res.get("error"):
+            return
+        n = int(res.get("removed_entries") or 0)
+        if not n:
+            return
+        freed = int(res.get("freed") or 0)
+        try:
+            from apmlog.core.model import human_size
+            size = human_size(float(freed))
+        except Exception:                                  # noqa: BLE001
+            size = f"{freed} B"
+        self.set_status(f"已自动清理解析缓存 {n} 项，释放 {size}")
 
     # ---------------- 插件 ----------------
 
@@ -1659,12 +1727,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply(keep_window=True)
         self._save_view()
 
-    def _apply(self, keep_window: bool = False) -> None:
+    def _apply(self, keep_window: bool = False, cheap: bool = False) -> None:
+        """按当前预设重建图表/地图/时间线。
+
+        ``cheap=True`` 用于“只是切了个页签”这种场景：拿一个指纹比一下，
+        没变化就直接返回。以前切页签也会走全套重建（103 MB 日志实测 4.4 s）。
+        """
         if self.store is None:
             return
         t_start = float(self.store.meta.get("stats", {}).get("t_start", 0.0) or 0.0)
         t_end = float(self.store.meta.get("t_end", 0.0) or 0.0)
         win = self._win if (keep_window and self._win) else (t_start, t_end)
+        fp = (str(self._preset), id(self.store), float(win[0]), float(win[1]),
+              len(self._events), len(self._alerts),
+              tuple(str(k) for k in self._extra),
+              tuple(tuple(str(k) for k in g) for g in self._groups))
+        if cheap and fp == self._applied_fp:
+            if not self._playing:
+                self.play_bar.set_readout(self._cursor_t or win[0], win[0], win[1], False)
+            return
+        self._applied_fp = fp
         try:
             # 通道源认插件合成通道：插件预设里引用自己算的通道也能出图
             src = self.plugins.channel_source(self.store)
@@ -1693,25 +1775,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.skipped_label.setText("已跳过：" + "、".join(skipped) if skipped else "")
         # 多轨迹：一次把全部位置源交给地图（主轨迹跟光标，其余可勾选对比）。
         # 数据层不支持 tracks() 时优雅退回单轨迹，不让旧缓存或半成品把界面弄黑。
-        try:
-            trs = self.store.tracks() if hasattr(self.store, "tracks") else []
-        except Exception:                                     # noqa: BLE001
-            log.exception("读取多轨迹失败，退回单轨迹")
-            trs = []
-        if trs:
-            self.map.set_tracks(trs)
-        else:
-            self.map.set_track(self.store.track())
-        if self._track_vis is not None:
-            self.map.legend.set_visible(self._track_vis)
-            self.map._on_legend(self._track_vis)
-        self.map.set_events(self._events_with_pos(ev_dicts))
-        self.map.set_regions(rg_dicts)
+        #
+        # 切页（cheap=True）**不要**重推这些：2.6 M 点的轨迹重建一次实测 185 ms，
+        # 而地图/时间线的数据只跟日志、事件集合有关，跟当前窗口无关。
+        if not cheap:
+            try:
+                trs = self.store.tracks() if hasattr(self.store, "tracks") else []
+            except Exception:                                 # noqa: BLE001
+                log.exception("读取多轨迹失败，退回单轨迹")
+                trs = []
+            if trs:
+                self.map.set_tracks(trs)
+            else:
+                self.map.set_track(self.store.track())
+            if self._track_vis is not None:
+                self.map.legend.set_visible(self._track_vis)
+                self.map._on_legend(self._track_vis)
+            self.map.set_events(self._events_with_pos(ev_dicts))
+            self.map.set_regions(rg_dicts)
+            self.timeline.set_modes(self.store.modes())
+            self.timeline.set_events(ev_dicts)
+            self.timeline.set_regions(rg_dicts)
         self.timeline.set_span(*win)
-        self.timeline.set_modes(self.store.modes())
         self._push_mode_colors()
-        self.timeline.set_events(ev_dicts)
-        self.timeline.set_regions(rg_dicts)
         self.timeline.set_selection(*self._win) if self._win else self.timeline.set_selection(None, None)
         if not self._playing:
             self.play_bar.set_readout(self._cursor_t or win[0], win[0], win[1], False)
@@ -3190,6 +3276,101 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except Exception as exc:                       # noqa: BLE001
             rep.append(f"  左侧栏拖动: 失败（{type(exc).__name__}: {exc}）")
         rep.append(f"  PNG: {out} {'OK' if ok else 'FAIL'}  轨迹页: {stem}_map{suf} {'OK' if ok_map else 'FAIL'}")
+
+        # ---- 0.1.1 新增三项：缓存自动清理 / MAVFTP 回环下载 / U 盘模式护栏 ----
+        # 目的：这三块都是 0.1.1 的新代码，必须在**打包后的装置上**真跑一次，
+        # 而不是只在源码里跑单元测试——打包最容易丢的就是数据/隐式依赖。
+        smoke_fail: list[str] = []
+        try:
+            import os as _os
+            import shutil as _shutil
+            import tempfile as _tempfile
+            from apmlog.core import cache as _cache
+            from apmlog.ui.settings import Settings as _Settings
+
+            croot = Path(_tempfile.mkdtemp(prefix="selftest-cache-"))
+            for _name, _size, _days in (("old", 4096, 30), ("fresh", 1024, 0.1)):
+                _d = croot / _name
+                _d.mkdir()
+                _f = _d / "index.json"
+                _f.write_bytes(b"x" * _size)
+                _ts = time.time() - _days * 86400
+                _os.utime(_f, (_ts, _ts))
+            _s = _Settings(Path(_tempfile.mkdtemp()) / "selftest-settings.json")
+            _s.set("cache_auto_clean", True)
+            _s.set("cache_clean_policy", "7d")
+            _res = _cache.run_if_due(croot, _s)
+            ok_cache = bool(_res) and int(_res["removed_entries"]) == 1 \
+                and (croot / "fresh").exists() and not (croot / "old").exists()
+            rep.append(f"  缓存自动清理: 删 {_res['removed_entries'] if _res else 0} 项 / "
+                       f"释放 {_res['freed'] if _res else 0} B / 保留最新"
+                       f"（{'OK' if ok_cache else 'FAIL'}）")
+            _shutil.rmtree(croot, ignore_errors=True)
+            if not ok_cache:
+                smoke_fail.append("缓存自动清理")
+        except Exception as exc:                       # noqa: BLE001 只为自检输出
+            rep.append(f"  缓存自动清理: 失败（{type(exc).__name__}: {exc}）")
+            smoke_fail.append("缓存自动清理")
+
+        try:
+            import tempfile as _tempfile
+            from apmlog.link.endpoint import MavLinkSession as _Sess
+            from apmlog.link.fakes import FakeFC as _FakeFC
+            from apmlog.link.ftp import MavFtp as _MavFtp
+            from apmlog.link.transport import TcpClientTransport as _Tcp
+
+            _blob = bytes((i * 7) & 0xFF for i in range(6000))
+            _fc = _FakeFC([(0, b"")], heartbeat_period=0.05,
+                          files={"/APM/LOGS/00000000.BIN": _blob})
+            _h, _p = _fc.serve_tcp("127.0.0.1", 0)
+            _sess = _Sess(_Tcp(_h, _p), name="selftest-ftp")
+            _sess.start()
+            try:
+                if not _sess.wait_for("HEARTBEAT", timeout=5):
+                    raise RuntimeError("没有心跳")
+                _dst = Path(_tempfile.mkdtemp()) / "x.BIN"
+                _r = _MavFtp(_sess, timeout=3.0).fetch("/APM/LOGS/00000000.BIN", _dst)
+                ok_ftp = _dst.read_bytes() == _blob
+                rep.append(f"  MAVFTP 通道: {_r['bytes']} B / {_r['elapsed']:.2f}s = "
+                           f"{_r['rate'] / 1024:.0f} KB/s 内容{'一致' if ok_ftp else '不一致!'}")
+            finally:
+                _sess.close()
+                _fc.stop()
+            if not ok_ftp:
+                smoke_fail.append("MAVFTP 通道")
+        except Exception as exc:                       # noqa: BLE001
+            rep.append(f"  MAVFTP 通道: 失败（{type(exc).__name__}: {exc}）")
+            smoke_fail.append("MAVFTP 通道")
+
+        try:
+            from apmlog.link.fakes import FakeFC as _FakeFC2
+            from apmlog.ui import linkpanel as _lp
+
+            _w = _lp._LinkWorker()
+            _msgs: list[tuple[bool, str]] = []
+            _w.msd_result.connect(lambda ok_, msg: _msgs.append((ok_, msg)))
+            _fc2 = _FakeFC2([(0, b"")], heartbeat_period=0.05, armed=True)
+            _h2, _p2 = _fc2.serve_tcp("127.0.0.1", 0)
+            _w._do_connect(target=f"tcp:{_h2}:{_p2}", baud=57600, wait=3.0)
+            try:
+                _w._do_mass_storage()
+                ok_msd = bool(_msgs) and _msgs[-1][0] is False and "解锁" in _msgs[-1][1] \
+                    and len(_fc2.commands) == 0
+                _tail = (_msgs[-1][1][:24] if _msgs else "无结果")
+                rep.append(f"  U 盘护栏: armed 拦截 {'OK' if ok_msd else 'FAIL'}｜"
+                           f"发送命令 {len(_fc2.commands)} 条（应 0）｜提示《{_tail}…》")
+            finally:
+                if _w.sess is not None:
+                    _w.sess.close()
+                _fc2.stop()
+                _w.deleteLater()
+            if not ok_msd:
+                smoke_fail.append("U 盘护栏")
+        except Exception as exc:                       # noqa: BLE001
+            rep.append(f"  U 盘护栏: 失败（{type(exc).__name__}: {exc}）")
+            smoke_fail.append("U 盘护栏")
+
+        rep.append(f"  冒烟总判定: {'通过' if not smoke_fail else '未通过：' + '、'.join(smoke_fail)}")
         for line in rep:
             print(line)
         # 窗口版 exe 没有控制台，把同一份报告写盘，便于核对（与 PNG 同目录）
@@ -3198,7 +3379,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                              encoding="utf-8")
         except OSError:
             pass
-        return 0 if (ok and ok_map) else 1
+        return 0 if (ok and ok_map and not smoke_fail) else 1
     win.show()          # 必须显式 show：否则带日志启动时只有后台进程，窗口不会出现
     if args.logs:
         win.load(args.logs[0])

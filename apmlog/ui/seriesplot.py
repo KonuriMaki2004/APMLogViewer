@@ -243,6 +243,61 @@ class _Ghost:
         return max(0, i1 - i0)
 
 
+class _EventStrips(pg.GraphicsObject):
+    """一个泳道上所有事件竖标的**单一**图元（2026-10-29 性能修复）。
+
+    以前每个事件一条 InfiniteLine：103 MB / 2.6M 报文的日志上有 643 个事件 × 5 道
+    = 3300+ 图元，一次重绘就要 0.8 s，缩放、切页、悬停全部跟着卡。
+    现在改为自绘：图元恒为 1 个，``paint()`` 只画当前视图范围内的事件，代价是
+    O(可见事件)，与日志总事件数无关。
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ev: list[tuple[float, tuple[int, int, int]]] = []
+        self.setZValue(10)
+        self.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+
+    def set_events(self, ev: list[tuple[float, tuple[int, int, int]]]) -> None:
+        if ev == self._ev:
+            return
+        self.prepareGeometryChange()
+        self._ev = ev
+        self.update()
+
+    def count(self) -> int:
+        return len(self._ev)
+
+    def boundingRect(self) -> QtCore.QRectF:      # noqa: N802  Qt 命名
+        # 图元挂在 ViewBox 的数据坐标系里；范围给大，实际不参与自动量程（ignoreBounds）
+        return QtCore.QRectF(-1e9, -1e9, 2e9, 2e9)
+
+    def paint(self, p: QtGui.QPainter, *args: Any) -> None:      # noqa: D401
+        if not self._ev:
+            return
+        vb = self.getViewBox()
+        if vb is None:
+            return
+        (x0, x1), (y0, y1) = vb.viewRange()
+        if not (math.isfinite(x0) and math.isfinite(x1)) or x1 <= x0:
+            return
+        h = y1 - y0
+        if not math.isfinite(h) or h <= 0:
+            return
+        top = y1
+        bottom = y1 - 0.16 * h          # 只在泳道顶部画一段，与旧实现一致
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, False)
+        pen = QtGui.QPen()
+        pen.setWidth(0)                 # cosmetic pen：无论缩放都是 1 像素
+        p.setPen(pen)
+        for t, col in self._ev:
+            if t < x0 or t > x1:
+                continue
+            pen.setColor(QtGui.QColor(*col))
+            p.setPen(pen)
+            p.drawLine(QtCore.QPointF(t, bottom), QtCore.QPointF(t, top))
+
+
 class _Lane:
     """一个泳道：PlotItem + 真实折线 + 包络图元 + 游标 + 读数。"""
 
@@ -333,7 +388,9 @@ class _Lane:
         self.empty_txt.setZValue(30)
         self.plot.addItem(self.empty_txt, ignoreBounds=True)
 
-        self.event_items: list[Any] = []
+        self.event_items: list[Any] = []      # 兼容旧接口：现在存的是事件清单，不是图元
+        self.event_strips = _EventStrips()
+        self.plot.addItem(self.event_strips, ignoreBounds=True)
         self.badge_items: list[pg.TextItem] = []      # 顶部感叹号徽标（只挂在首泳道）
         self.region_items: list[pg.LinearRegionItem] = []
         self.selection: Optional[pg.LinearRegionItem] = None
@@ -523,6 +580,10 @@ class SeriesPlot(QtWidgets.QWidget):
         hl.setSpacing(6)
         self._chips: list[QtWidgets.QPushButton] = []
         self._chip_map: dict[tuple[int, int], QtWidgets.QPushButton] = {}   # (道号, 曲线号) -> 胶囊
+        # 切页/缩放时用来“只换数据、不重建控件”的指纹（见 set_lanes）
+        self._lane_sig: Optional[tuple] = None
+        self._events_sig: Optional[tuple] = None
+        self._regions_sig: Optional[tuple] = None
         self.setFont(_ui_font(9))
         self._theme_btn = QtWidgets.QToolButton(self._header)
         self._theme_btn.setText("主题")
@@ -559,6 +620,10 @@ class SeriesPlot(QtWidgets.QWidget):
         # 注意：mkPen(0) 会被 pyqtgraph 当成调色板序号 0 = 红色实线，“无边框”必须传 None
         self._graphics.ci.setBorder(None)
         self._graphics.setMinimumWidth(560)
+        # 背景（网格、坐标轴、刻度）缓存成一张 pixmap：每次切回曲线页 Qt 都要重画一遍
+        # viewport，103 MB 日志 5 道实测重画 78 ms，缓存后只剩重画数据项。
+        # 主题变了/泳道重建时必须 resetCachedContent（见 set_theme / _clear_lanes）。
+        self._graphics.setCacheMode(QtWidgets.QGraphicsView.CacheModeFlag.CacheBackground)
         # 泳道多时不能把它们压扁：给每道一个最小像元高，装不下就纵向滚动。
         # （1366×768 上开 10 道时，不滚动的话每道只剩 80px，曲线基本看不出来）
         self._scroll = QtWidgets.QScrollArea(self)
@@ -597,8 +662,43 @@ class SeriesPlot(QtWidgets.QWidget):
     # ------------------------------------------------------------------ #
 
     def set_lanes(self, lanes: Sequence[LaneSpec], t_span: Optional[tuple[float, float]] = None) -> None:
-        """重建全部泳道。"""
+        """重建全部泳道；**同一批通道只是换了窗口时只换数据，不重建控件**。
+
+        切换页签 / 缩放后都会走到这里。以前无条件是“拆光重建”（5 道 × PlotItem +
+        胶囊 + 坐标轴），103 MB 日志实测 302 ms／次，切页卡顿就是这个。
+        现在先比签名：通道集合、颜色、单位、阈值、band、叠加曲线都没变，就只把新数据
+        装回现有 ``_Lane``，把控件创建全部省掉。
+        """
         hide_tip()          # 提示可以“不自动消失”，重建泳道时旧的读数必须关掉
+        # 重建过程中先关绘制：一次 set_lanes 会触发 setData / 范围变化 / set_events 好几轮
+        # 请求重画，103 MB 日志实测能画三整遍（0.3 s 全花在重复 paintEvent 上）。
+        g = self._graphics
+        was_on = g.updatesEnabled()
+        g.setUpdatesEnabled(False)
+        try:
+            self._set_lanes_inner(lanes, t_span)
+        finally:
+            g.setUpdatesEnabled(was_on)
+            if was_on:
+                g.viewport().update()
+
+    def _set_lanes_inner(self, lanes: Sequence[LaneSpec],
+                         t_span: Optional[tuple[float, float]] = None) -> None:
+        sig = self._lanes_signature(lanes)
+        if lanes and sig == self._lane_sig and len(lanes) == len(self._lanes):
+            self._update_lanes_in_place(lanes)
+            self._view = (float("nan"), float("nan"))
+            self._apply_min_height()
+            span = self._compute_span()
+            if t_span is not None and len(t_span) == 2 and all(math.isfinite(v) for v in t_span):
+                self._t_span = (float(t_span[0]), float(t_span[1]))
+            else:
+                self._t_span = span
+            self._set_view(self._t_span, emit=False)
+            self.set_events(self._events)
+            self.set_regions(self._regions)
+            self._refresh()
+            return
         self._clear_lanes()
         if not lanes:
             self._refresh()
@@ -642,6 +742,83 @@ class SeriesPlot(QtWidgets.QWidget):
         self.set_events(self._events)
         self.set_regions(self._regions)
         self._refresh()
+        self._lane_sig = sig
+
+    # ---- 原地换数据（不重建控件）---------------------------------------- #
+    def _lanes_signature(self, lanes: Sequence[LaneSpec]) -> tuple:
+        """描述“这批泳道长什么样”——只包含影响控件结构的字段，不含数据本身。"""
+        def color_of(c: Any) -> tuple:
+            try:
+                return tuple(int(v) for v in (c or ()))
+            except Exception:                      # noqa: BLE001
+                return ()
+
+        def one(s: LaneSpec) -> tuple:
+            return (str(s.label), str(s.unit or ""), str(getattr(s, "note", "") or ""),
+                    color_of(s.color),
+                    None if s.threshold is None else float(s.threshold),
+                    None if s.band is None else (float(s.band[0]), float(s.band[1])),
+                    None if s.y_min is None else float(s.y_min),
+                    None if s.y_max is None else float(s.y_max),
+                    bool(s.log_y),
+                    tuple((str(g.label), str(g.unit or ""), color_of(g.color))
+                          for g in (getattr(s, "overlays", None) or ())))
+        return tuple(one(s) for s in lanes)
+
+    def _update_lanes_in_place(self, lanes: Sequence[LaneSpec]) -> None:
+        """把新窗口的数据装回现有泳道。控件、胶囊、坐标轴、事件条带全部保留。
+
+        ``hidden`` 不进签名，也不在这里重置：用户自己在胶囊上取消勾选的通道，
+        不该因为切了一次页又自己回来。
+        """
+        for lane, spec in zip(self._lanes, lanes):
+            if spec.color is None or len(spec.color) != 3:
+                spec.color = PALETTES[self._theme][lane.index % 16]
+            lane.spec = spec
+            lane.key = str(getattr(spec, "key", "") or "")
+            for gi, (ghost, gspec) in enumerate(
+                    zip(lane.ghosts, getattr(spec, "overlays", None) or ())):
+                if gspec.color is None or len(gspec.color) != 3:
+                    gspec.color = OVERLAY_COLORS[gi % len(OVERLAY_COLORS)]
+                ghost.spec = gspec
+            lane.load()
+            lane.mode = "raw"
+            self._apply_lane_style(lane)
+            self._restyle_chip(lane, spec)
+
+    def _restyle_chip(self, lane: _Lane, spec: LaneSpec) -> None:
+        """“空通道”标记变了只改胶囊的置灰/勾选，**不**为它重建泳道。
+
+        空通道是按当前窗口判的（某个通道在放大后可能变成全 0），以前它一变
+        整页就拆了重建，切页时的 1 s 卡顿就是这么来的。
+        """
+        btn = self._chip_map.get((lane.index, 0))
+        if btn is None:
+            return
+        empty = bool(getattr(spec, "empty", False))
+        cur_empty = bool(btn.property("empty"))
+        if cur_empty == empty and btn.isChecked() == (not lane.hidden):
+            return
+        c = tuple(spec.color)
+        if empty:
+            btn.setStyleSheet(
+                "QPushButton{padding:1px 6px;border:1px solid #b9bcc2;border-radius:8px;"
+                "background:#e9eaec;color:#8a8f98;}"
+                "QPushButton::checked{background:#c9ccd2;color:#5a5f68;}")
+            btn.setToolTip(f"{lane.label}：该通道当前窗口内恒为 0（空通道）；点击可显示")
+        else:
+            btn.setStyleSheet(
+                f"QPushButton{{padding:1px 6px;border:1px solid #{c[0]:02x}{c[1]:02x}{c[2]:02x};"
+                f"border-radius:8px;background:#{c[0]:02x}{c[1]:02x}{c[2]:02x}22;}}"
+                f"QPushButton::checked{{background:#{c[0]:02x}{c[1]:02x}{c[2]:02x};color:white;}}"
+                f"QPushButton::!checked{{color:gray;}}")
+            btn.setToolTip(f"{lane.label}｜主曲线｜点击单独隐藏/显示")
+        btn.setProperty("empty", empty)
+        if btn.isChecked() != (not lane.hidden):
+            btn.blockSignals(True)
+            btn.setChecked(not lane.hidden)
+            btn.blockSignals(False)
+        self._sync_header_height()
 
     def lane_labels(self) -> list[str]:
         """当前泳道的标签（按显示顺序），给"叠加到哪条道"的下拉用。"""
@@ -728,34 +905,39 @@ class SeriesPlot(QtWidgets.QWidget):
             self._suspend -= 1
 
     def set_events(self, events: Sequence[dict]) -> None:
-        """事件小竖标：{'t','severity','display'}。"""
+        """事件小竖标：{'t','severity','display'}。
+
+        竖标由每道一个 ``_EventStrips`` 自绘，不再每事件一个 InfiniteLine；
+        ``lane.event_items`` 保留为“本道收到的事件清单”（旧接口语义）。
+        """
         self._events = [dict(e) for e in (events or [])]
-        for lane in self._lanes:
-            for it in lane.event_items:
-                lane.plot.removeItem(it)
-            lane.event_items = []
-        th = _THEME[self._theme]
-        self._badges = []
+        strips: list[tuple[float, tuple[int, int, int]]] = []
         for ev in self._events[:2000]:
             t = ev.get("t")
             if t is None or not math.isfinite(float(t)):
                 continue
             sev = str(ev.get("severity", "info"))
-            col = SEVERITY_COLORS.get(sev, SEVERITY_COLORS["info"])
-            for lane in self._lanes:
-                ln = pg.InfiniteLine(pos=float(t), angle=90, movable=False,
-                                     pen=pg.mkPen(col, width=1.4),
-                                     span=(0.84, 1.0))     # 只在泳道顶部画一段（不能误用 bounds 限幅）
-                ln.setZValue(10)
-                lane.plot.addItem(ln, ignoreBounds=True)
-                lane.event_items.append(ln)
-        # 文字不再直接画在图上（会挤成一团），改成顶部感叹号徽标 + 悬停提示，
-        # 徒标位置依赖当前视图范，所以在 _refresh() 的 _relayout_badges() 里生成。
+            strips.append((float(t), SEVERITY_COLORS.get(sev, SEVERITY_COLORS["info"])))
+        # 同一批事件（切页、拖动窗口、缩放都会重调）就不要再装一遗
+        if strips == self._events_sig and self._lanes:
+            return
+        self._events_sig = strips
+        for lane in self._lanes:
+            lane.event_strips.set_events(strips)
+            lane.event_items = list(strips)
+        # 文字不直接画在图上（会挤成一团），改用顶部感叹号徽标 + 悬停提示，
+        # 徽标位置依赖当前视图范围，所以在 _refresh() 的 _relayout_badges() 里生成。
+        self._badges = []
         self._relayout_badges()
 
     def set_regions(self, regions: Sequence[dict]) -> None:
         """告警/选中区间纵向半透明带：{'t0','t1','severity','title'}。"""
         self._regions = [dict(r) for r in (regions or [])]
+        key = [(float(r.get("t0", float("nan"))), float(r.get("t1", float("nan"))),
+                str(r.get("severity", ""))) for r in self._regions[:400]]
+        if key == self._regions_sig and self._lanes:
+            return                       # 告警区间没变：160 个 LinearRegionItem 不要重建
+        self._regions_sig = key
         for lane in self._lanes:
             for it in lane.region_items:
                 lane.plot.removeItem(it)
@@ -812,6 +994,7 @@ class SeriesPlot(QtWidgets.QWidget):
         span = self._view if self._is_finite(self._view) else self._t_span
         self._theme = theme
         self._graphics.setBackground(_THEME[theme]["bg"])
+        self._graphics.resetCachedContent()          # 背景缓存跟着换色，否则残留旧底色
         self.set_lanes(specs, t_span=span)
         if math.isfinite(self._cursor_t):
             self.set_time(self._cursor_t)
@@ -1038,6 +1221,10 @@ class SeriesPlot(QtWidgets.QWidget):
     def _clear_lanes(self) -> None:
         """拆掉所有泳道与顶部图例条（保留主题按钮）。"""
         self._graphics.ci.clear()
+        self._graphics.resetCachedContent()          # 泳道重排后背景缓存不再代表当前画面
+        self._lane_sig = None          # 拆光了：下次 set_lanes 必须真重建
+        self._events_sig = None
+        self._regions_sig = None
         self._lanes = []
         self._chips = []
         self._chip_map = {}
@@ -1077,6 +1264,7 @@ class SeriesPlot(QtWidgets.QWidget):
         btn.setCursor(QtCore.Qt.PointingHandCursor)
         c = tuple(spec.color)
         empty = bool(getattr(spec, "empty", False))
+        btn.setProperty("empty", empty)
         if empty:
             # 置灰：灰边框 + 灰字，一眼看出"这条默认不看"
             btn.setStyleSheet(
@@ -1368,7 +1556,7 @@ class SeriesPlot(QtWidgets.QWidget):
             return
         wpx = max(200, int(self._graphics.width()))
         raw_limit = self._raw_limit_override or max(4000, 4 * wpx)
-        nb = self._nbuckets_override or min(2500, max(400, int(wpx * 1.5)))
+        nb = self._nbuckets_override or min(2000, max(400, int(wpx)))   # 每像素一对 min/max 就够
         for lane in self._lanes:
             if lane.hidden:
                 continue

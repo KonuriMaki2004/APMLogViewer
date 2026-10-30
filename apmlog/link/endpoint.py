@@ -623,6 +623,46 @@ class MavLinkSession:
         sysid, compid = self.target_ids()
         self._send("log_request_end_send", sysid, compid)
 
+    # ------------------------------------------------------------ 指令 / 文件传输
+    def is_armed(self) -> bool:
+        """最近一帧飞控心跳里的解锁位（``MAV_MODE_FLAG_SAFETY_ARMED``）。
+
+        没收到心跳时返回 ``False``——调用方（U 盘模式）还要看 ``target_ids()``
+        能不能拿到飞控地址，两者都满足才会向下走。
+        """
+        if self.fc_sysid is None:
+            return False
+        info = self.heartbeats.get((int(self.fc_sysid), int(self.fc_compid or 1)))
+        return bool(info.armed) if info is not None else False
+
+    def send_command_long(self, command: int, params: Any, *, confirmation: int = 0) -> None:
+        """发一条 ``COMMAND_LONG``（定向给飞控）。
+
+        只提供发入口，不做“是不是危险指令”的判断——那是调用方（如 U 盘模式按钮）
+        的职责，且必须自己弹二次确认。
+        """
+        sysid, compid = self.target_ids()
+        p = [float(x) for x in list(params)[:7]]
+        p += [0.0] * (7 - len(p))
+        self._send("command_long_send", sysid, compid, int(command), int(confirmation),
+                   *p)
+
+    def send_file_transfer_protocol(self, payload: bytes, *,
+                                    target_component: Optional[int] = None) -> None:
+        """发一条 ``FILE_TRANSFER_PROTOCOL``（MAVFTP）。
+
+        载荷必须**原样**发出去：``payload[0..1]`` 是 seq 低/高字节，``[2]`` 是 session，
+        ``[3]`` 是 opcode——拿它当“目标地址前缀”去改会直接写坏报文（2026-10-30 真机实测：
+        飞控能回包但把请求当成空路径的 ListDirectory）。目标地址只存在于 MAVLink 消息头里。
+        """
+        sysid, compid = self.target_ids()
+        if target_component is not None:
+            compid = int(target_component)
+        buf = bytearray(payload[:251])
+        if len(buf) < 251:
+            buf.extend(b"\x00" * (251 - len(buf)))
+        self._send("file_transfer_protocol_send", 0, sysid, compid, bytes(buf))
+
     def ping(self) -> None:
         self._send("ping_send", self.our_sysid, self.our_compid)
 
