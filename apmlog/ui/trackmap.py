@@ -23,6 +23,7 @@ GCJ-02 对齐
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 from dataclasses import dataclass, field
@@ -31,8 +32,11 @@ from typing import Any, Optional, Sequence
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from ..core.trackdiff import (MIN_LENGTH_M, PairDiff, compare, fmt_m, fmt_pct,
+                              overall)
 from . import _tilemath as tm
 from ._tiles import (BUILTIN_SOURCES, DEFAULT_SOURCE, TileSource, TileStore, default_cache_dir)
+from .trackdiffpanel import TrackDiffPanel
 from .tracklegend import TRACK_COLORS, TrackLegendPanel
 
 log = logging.getLogger(__name__)
@@ -509,6 +513,10 @@ class TrackMapWidget(QtWidgets.QWidget):
         self.legend = TrackLegendPanel(self.view.viewport())
         self.legend.visibilityChanged.connect(self._on_legend)
         self.legend.hide()
+        # 轨迹差异面板：挂在勾选栏正下方（未满 2 条可比轨迹时给一句提示）
+        self.diff = TrackDiffPanel(self.view.viewport())
+        self.diff.hide()
+        self._diff_cache: dict[tuple[str, str], PairDiff] = {}
 
         self._refresh = QtCore.QTimer(self)
         self._refresh.setSingleShot(True)
@@ -541,9 +549,11 @@ class TrackMapWidget(QtWidgets.QWidget):
         items = [t for t in (tracks or []) if t is not None]
         self._entries = []
         self._primary_key = ""
+        self._diff_cache.clear()                     # 换日志：旧的一对差值作废
         if not items:
             self.legend.set_tracks([])
             self.legend.hide()
+            self.diff.hide()
             self.set_track(None)
             return
         for i, tr in enumerate(items):
@@ -1508,6 +1518,80 @@ class TrackMapWidget(QtWidgets.QWidget):
             return kind != "geodetic"
         return False
 
+    #: 差异面板最多列几对（再多就只列前几对，总体仍按全部算）
+    DIFF_MAX_ROWS = 4
+
+    @staticmethod
+    def _pair_tip(d: PairDiff) -> str:
+        """一对轨迹的完整口径说明（鼠标悬停看明细）。"""
+        head = f"{d.a_label} ↔ {d.b_label}"
+        if not d.ok:
+            return head + "\n" + (d.reason or "无法比较")
+        lines = [
+            head,
+            f"均值 {fmt_m(d.mean)}｜中位 {fmt_m(d.median)}｜P95 {fmt_m(d.p95)}｜最大 {fmt_m(d.max)}",
+            f"重叠 {d.overlap_s:.0f} s｜对齐样本 {d.n}（丢弃 {d.dropped}）",
+            f"里程：{d.a_key} {fmt_m(d.length_a)}｜{d.b_key} {fmt_m(d.length_b)}"
+            f"｜归一化基准 {fmt_m(d.length)}",
+            f"占里程：均值 {fmt_pct(d.pct)}｜P95 {fmt_pct(d.pct_p95)}｜最大 {fmt_pct(d.pct_max)}",
+        ]
+        if not math.isfinite(d.pct):
+            lines.append(f"重叠段里程不足 {MIN_LENGTH_M:.0f} m，百分比不具参考性")
+        return "\n".join(lines)
+
+    def _update_diff(self) -> None:
+        """算并显示「单航线差异 / 总体差异」——跟着勾选栏走。"""
+        if not hasattr(self, "diff"):
+            return
+        if self._mode == MODE_EMPTY or len(self._entries) < 2:
+            self.diff.hide()
+            self._reposition_overlays()
+            return
+        vis = set(self.visible_tracks())
+        chosen = [e for e in self._entries if e.key in vis]
+        if len(chosen) < 2:
+            self.diff.set_hint(
+                "勾选 2 条及以上轨迹，显示差异预估",
+                note="差异是两条轨迹之间的量；只勾一条时没有第二组位置可比。")
+            self.diff.show()
+            self._reposition_overlays()
+            return
+        diffs: list[PairDiff] = []
+        for a, b in itertools.combinations(chosen, 2):
+            key = (a.key, b.key)
+            got = self._diff_cache.get(key)
+            if got is None:
+                try:
+                    got = compare(a.tr, b.tr)
+                except Exception as exc:                # 估算不能把地图拖垮
+                    log.debug("轨迹差异计算失败 %s/%s: %s", a.key, b.key, exc)
+                    got = PairDiff(a_key=a.key, b_key=b.key, a_label=a.label,
+                                   b_label=b.label, reason=f"计算失败：{exc}")
+                self._diff_cache[key] = got
+            diffs.append(got)
+
+        rows = []
+        for d in diffs[:self.DIFF_MAX_ROWS]:
+            rows.append((f"{d.a_key} ↔ {d.b_key}",
+                         fmt_pct(d.pct) if d.ok else "—", self._pair_tip(d)))
+        total = overall(diffs)
+        n_ok = sum(1 for d in diffs if d.ok)
+        total_row = (f"总体（{n_ok} 对）" if len(diffs) > 1 else "总体",
+                     fmt_pct(total.pct),
+                     "全部可比轨迹对按里程加权：Σ均值偏差 ÷ Σ平均里程\n"
+                     f"Σ均值偏差 {fmt_m(total.mean_sum)}｜Σ平均里程 {fmt_m(total.length_sum)}\n"
+                     f"参与 {n_ok}/{len(diffs)} 对（不可比的已跳过）")
+        bits = [f"已选 {len(chosen)} 条 → {len(diffs)} 对；基准=各对重叠段平均里程。"]
+        if len(diffs) > self.DIFF_MAX_ROWS:
+            bits.append(f"只列前 {self.DIFF_MAX_ROWS} 对，总体含全部。")
+        if any(d.ok and d.frame == "local" for d in diffs):
+            bits.append("本地 ENU（无经纬度）。")
+        if n_ok < len(diffs):
+            bits.append(f"{len(diffs) - n_ok} 对坐标系不同，未计入总体。")
+        self.diff.set_pairs(rows, total_row, note=" ".join(bits))
+        self.diff.show()
+        self._reposition_overlays()
+
     def _update_legend(self) -> None:
         specs = [(e.key, e.label, e.color, e.n, e.primary, self._drawable(e))
                  for e in self._entries]
@@ -1515,6 +1599,7 @@ class TrackMapWidget(QtWidgets.QWidget):
         many = len(self._entries) > 1
         # 本地模式（纯视觉日志）同样要给勾选栏：多条 ENU 轨迹叠在一起对比才有意义
         self.legend.setVisible(bool(many) and self._mode != MODE_EMPTY)
+        self._update_diff()
         if many:
             self.legend.setToolTip(
                 "勾选要显示的轨迹。主轨迹（光标的跟从对象）用高度渐变色，\n"
@@ -1555,6 +1640,7 @@ class TrackMapWidget(QtWidgets.QWidget):
             pass
         self._draw_others()
         self._expand_local_rect()
+        self._update_diff()                          # 勾选变了，差异预估值同步刷新
         self.trackVisibilityChanged.emit(sorted(want))
 
     def _set_layer_visible(self, layer: "_Layer", on: bool) -> None:
@@ -1904,6 +1990,21 @@ class TrackMapWidget(QtWidgets.QWidget):
             self.legend.move(max(0, vp.width() - lw - self.LEGEND_MARGIN), self.LEGEND_MARGIN)
             self.legend.resize(lw, lh)
             self.legend.raise_()
+        if hasattr(self, "diff") and self.diff.isVisible():
+            # 紧贴在勾选栏下方，右边对齐；窗口矮的话往上提，不能顶出可视区
+            self.diff.adjustSize()
+            dw = max(self.diff.sizeHint().width(),
+                     self.legend.width() if self.legend.isVisible() else 0)
+            dh = self.diff.sizeHint().height()
+            top = (self.legend.y() + self.legend.height() + 6
+                   if self.legend.isVisible() else self.LEGEND_MARGIN)
+            dh = min(dh, max(40, vp.height() - top - 8))
+            if top + dh > vp.height() - 8:
+                top = max(self.LEGEND_MARGIN, vp.height() - dh - 8)
+            dw = min(dw, max(160, vp.width() - 2 * self.LEGEND_MARGIN))
+            self.diff.move(max(0, vp.width() - dw - self.LEGEND_MARGIN), top)
+            self.diff.resize(dw, dh)
+            self.diff.raise_()
 
     def _show_placeholder(self, text: str) -> None:
         if text:

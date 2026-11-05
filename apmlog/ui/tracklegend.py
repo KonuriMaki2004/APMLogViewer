@@ -170,6 +170,13 @@ class TrackLegendPanel(QtWidgets.QWidget):
     def visible(self) -> list[str]:
         return [r.key for r in self._rows if self._row_visible(r)]
 
+    def checkbox(self, key: str) -> Optional[QtWidgets.QCheckBox]:
+        """按轨迹 key 取勾选框（差异面板/测试用，别去猜标签文本）。"""
+        for r in self._rows:
+            if r.key == str(key):
+                return r.check
+        return None
+
     def is_checked(self, key: str) -> bool:
         for r in self._rows:
             if r.key == str(key):

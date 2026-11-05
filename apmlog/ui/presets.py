@@ -120,6 +120,35 @@ PRESETS: list[Preset] = [
         _req("XKF3", "IPN", "IPE", "IPD", "IVN", "IVE", "IVD"),
         _req("XKF4", "TSF", "SP", "SV"),
     ], note="仅含 GNSS 的日志有 GPS；innovation 单位按 DataFlash 原值"),
+
+    # ---- 0.1.2：按现有数据源补的曲线（罗盘 / IMU / PID / 供电 / EKF / 遥控）----
+    # 新增组只往 PRESETS 里加条目，build_lanes / 取数 / 绘制走的是同一套，不动老预设。
+    Preset("mag", "罗盘（磁力计）", [
+        _req("MAG", "MagX", "MagY", "MagZ"),
+        _req("MAG", "MagX", inst=1, label_prefix="罗盘2 "),
+    ], note="MAG.MagX/Y/Z 是飞控融合后的磁场分量；罗盘2 那道只在装了两颗罗盘时才有数据"),
+    Preset("imu", "陀螺与加计", [
+        _req("IMU", "GyrX", "GyrY", "GyrZ"),
+        _req("IMU", "AccX", "AccY", "AccZ"),
+    ], note="IMU 原始陀螺与加速度（体轴系），只画最小实例号；看其它 IMU 在通道树加 IMU[n].GyrX"),
+    Preset("pid", "PID 分量", [
+        # 实际值与目标值同轴叠加（虚线＝目标），P/D/FF 各自一道
+        _pair("PIDR", "Act", "Tar", overlay_labels=("目标",)),
+        _req("PIDR", "P", "D", "FF"),
+    ], note="PIDR 为滚转速率环（ArduPilot 慢速 PID 日志）；Act=实际、Tar=目标，P/D/FF 为归一化分量"),
+    Preset("power", "供电与温度", [
+        _req("POWR", "Vcc", band=(4.5, 5.5)),
+        _req("MCU", "MVolt", band=(3.0, 3.6)),
+        _req("MCU", "MTemp"),
+        _req("BAT", "Temp"),
+    ], note="POWR.Vcc=5V 轨，MCU.MVolt=3.3V 轨（band 为正常区间参考），MCU.MTemp=主控温度，BAT.Temp=电池温度"),
+    Preset("ekf", "EKF 位置与速度", [
+        _req("XKF1", "PN", "PE", "PD"),
+        _req("XKF1", "VN", "VE", "VD"),
+    ], note="XKF1 是 EKF 输出（北/东/下位置与速度），不是 GNSS 原始量"),
+    Preset("rc", "遥控输入", [
+        _req("RCIN", "C1", "C2", "C3", "C4", fixed_range=(1000, 2000)),
+    ], note="RCIN 是接收机原始通道（µs）；摇杆行程看这里，电机输出看「电机与执行器」"),
 ]
 
 PRESET_BY_ID = {p.id: p for p in PRESETS}

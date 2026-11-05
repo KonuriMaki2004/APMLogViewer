@@ -15,7 +15,7 @@
 ;   全部随包安装，缺任一项软件都跑不起来或功能残缺。
 
 #define MyAppName "APMLogViewer"
-#define MyAppVersion "0.1.1"
+#define MyAppVersion "0.1.2"
 #define MyAppPublisher "KonuriMaki2004"
 #define MyAppURL "https://github.com/KonuriMaki2004/APMLogViewer"
 #define MyAppExeName "APMLogViewer.exe"
