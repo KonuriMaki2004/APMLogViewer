@@ -612,3 +612,45 @@ sha256 见同目录 `*.sha256`；`release/build_commits.txt` 记录本次构建�
   `test_track_perf`/`test_playback`/`test_timeline_click`/`test_left_pane` 共 **195 passed**。
 - 全量回归：见本次回报。
 - 截图：`selftest/trackdiff_all.png`（3 对）、`selftest/trackdiff_pair.png`（1 对）。
+
+---
+
+## 12. 0.1.2 发布（2026-11-05）
+
+### 12.1 版本与内容
+
+* 版本号：**0.1.2**（`apmlog.__version__` 与 `packaging/installer.iss` 同步）；
+* 曲线页：预设 **6 → 12 组**，新增罗盘、陀螺与加计、PID 分量、供电与温度、
+  EKF 位置与速度、遥控输入（口径见 §35 / CHANGELOG §10）；
+* 地图页：右上角轨迹勾选栏**下方**新增「轨迹差异」面板，逐对 + 总体偏差百分比，
+  勾选变化即时刷新（口径见 CONTRACT §36 / CHANGELOG §11）；
+* 版本号、README 功能列表同步更新。
+
+### 12.2 验证
+
+* 全量回归：**1053 passed / 1 skipped / 23 subtests**（含多轨迹勾选、播放头跟随、
+  缩放、左栏、切页性能等既有交互）。
+* 打包版自检（103.6 MB 真机日志）：退出码 0，加载 **1.59 s**；八项冒烟全通过；
+  地图页截图可见差异面板：`POS↔GPS#0 0.0033%`、`POS↔XKF1 0.0034%`、
+  `GPS#0↔XKF1 0.0043%`、`总体（3 对）0.0037%`。
+* 安装版（静默安装到临时目录）自检：退出码 0，加载 1.87 s，八项冒烟全通过，
+  363 个文件、exe sha256 与绿色包一致；卸载后目录清空。
+* 包内核对：`apmlog.core.trackdiff` / `apmlog.ui.trackdiffpanel` 均在 PYZ 中，
+  预设 id 12 个齐全，版本常量 `0.1.2`。
+
+### 12.3 产物
+
+| 文件 | 大小 | sha256 |
+| --- | --- | --- |
+| `APMLogViewer-0.1.2-win64-setup.exe` | 45,110,170 B | `71cc34fa94bc8fad…` |
+| `APMLogViewer-0.1.2-win64.zip` | 65,131,447 B | `d7d4080f3813abbe…` |
+
+构建提交：`FlightTune/APMLogViewer@apmlog-viewer = d8ac7c9`、
+`APMLogViewer-repo@main = 398ea99`（详见 `release/build_commits.txt`）。
+
+### 12.4 升级说明
+
+* 旧版 0.1.1 安装（`%LOCALAPPDATA%\Programs\APMLogViewer`）已卸载；
+  安装包沿用同一 `AppId`，可直接覆盖升级；
+* `views.json` 兼容：新增预设只是新的字符串 id，老的视图记忆照常读；
+* 轨迹差异只在**同一份日志内**比较，不含高程（基准不同），详见 CONTRACT §36。
