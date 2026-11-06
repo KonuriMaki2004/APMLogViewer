@@ -654,3 +654,44 @@ sha256 见同目录 `*.sha256`；`release/build_commits.txt` 记录本次构建�
   安装包沿用同一 `AppId`，可直接覆盖升级；
 * `views.json` 兼容：新增预设只是新的字符串 id，老的视图记忆照常读；
 * 轨迹差异只在**同一份日志内**比较，不含高程（基准不同），详见 CONTRACT §36。
+
+---
+
+## 13. Ubuntu 24.04 适配：`.deb` 打包（2026-11-06）
+
+### 13.1 产物
+
+| 文件 | 大小 | sha256 |
+| --- | --- | --- |
+| `APMLogViewer-0.1.2-amd64.deb` | 63,196,744 B | `2f37f512032cecb61676e92892fde65879d7b68fca7e4084711423bcd0e374b8` |
+
+安装后占用约 224 MB（`Installed-Size: 228572` KB），内置 Python 3.12 + Qt 6.12 运行库。
+
+### 13.2 适配改动
+
+* `packaging/apmlogviewer-linux.spec`：Linux onedir 规格（与 Windows 同一套 datas /
+  hiddenimports，`console=True` 让 `--selftest` 输出进终端；新增 `trackdiff` /
+  `trackdiffpanel` 的显式 hiddenimports）；
+* `packaging/build_deb.sh`：PyInstaller → 组装 `/opt/apmlogviewer`、`/usr/bin/apmlogviewer`、
+  `.desktop`、hicolor 图标、`DEBIAN/{control,postinst,postrm}` → `dpkg-deb --root-owner-group`；
+* `packaging/apmlogviewer.png`：从 `icon.ico` 的 256×256 帧原样取出（不是放大 16×16）；
+* `docs/UBUNTU.md`：依赖、构建、安装/卸载、自检、与 Windows 差异、已知限制。
+
+### 13.3 验证
+
+* 解包核对（`dpkg-deb -x` + PYZ）：`apmlog.core.trackdiff`、`apmlog.ui.trackdiffpanel`
+  均在；`apmlog` 版本常量 `0.1.2`；预设 id 12 个齐全（含 `mag/imu/pid/power/ekf/rc`）。
+* 安装：`dpkg --root=<临时根> --force-depends -i` → `Status: install ok installed`；
+  `/usr/bin/apmlogviewer` 符号链接、`.desktop`、`/opt/apmlogviewer` 均按预期落位。
+* 启动自检（安装目录里的可执行文件，offscreen）：**EXIT=0**，日志无 traceback；
+  加载 103.6 MB 真机日志 **25.45 s**（冷缓存 + 虚拟机磁盘），71 类报文 / 2 619 459 条 /
+  1331 参数 / 643 事件 / 32 告警；八项冒烟全通过。
+* 地图页截图：轨迹勾选栏下方「轨迹差异」面板可见，
+  `POS↔GPS#0 0.0033%`、`POS↔XKF1 0.0034%`、`GPS#0↔XKF1 0.0043%`、
+  `总体（3 对）0.0037%`，与 Windows 版同机同日志一致。
+
+### 13.4 限制
+
+* 构建机账号无免密 sudo → 未做真实系统级 `dpkg -i`（用假根安装 + 直接运行验证）；
+* 包未签名；`libxcb-cursor0` 等 xcb 依赖由 apt 补齐；
+* 串口下载需 `dialout` 组；MAVFTP / U 盘模式未在 Linux 真机上验证（仅 FakeFC 回环）。
