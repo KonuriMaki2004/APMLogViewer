@@ -695,3 +695,44 @@ sha256 见同目录 `*.sha256`；`release/build_commits.txt` 记录本次构建�
 * 构建机账号无免密 sudo → 未做真实系统级 `dpkg -i`（用假根安装 + 直接运行验证）；
 * 包未签名；`libxcb-cursor0` 等 xcb 依赖由 apt 补齐；
 * 串口下载需 `dialout` 组；MAVFTP / U 盘模式未在 Linux 真机上验证（仅 FakeFC 回环）。
+
+---
+
+## 14. 环境重建与一致性复核（2026-11-06）
+
+### 14.1 `.venv` 重建
+
+`workspace/apmlog/.venv` 被外部清理后重建：Python 3.14.7，按 `requirements.txt` 锁定版本
+（PySide6-Essentials 6.12.0 / shiboken6 6.12.0、pyqtgraph 0.14.0、pymavlink 2.4.50、
+pyserial 3.5、numpy 2.5.4、duckdb 1.5.6、PyYAML 6.0.3），另装测试所需的
+pytest 9.2.0 + pytest-subtests 0.15.0；**未引入清单外的新依赖**。
+
+### 14.2 全量回归
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest tests -q
+```
+
+**1051 passed / 3 skipped / 23 subtests passed（8 分 38 秒）**，与文档改动前的
+1051 / 3 / 23 完全一致——本次改动只有 `README.md`、`docs/RELEASE_NOTES_0.1.2.md`、
+`docs/CHANGELOG.md` 等文本，没有触及代码。
+
+### 14.3 八项自检：源码 vs 打包版
+
+同一份 103.6 MB 真机日志（`2026-10-29 14-18-00.bin`）：
+
+| 运行方式 | 退出码 | 加载耗时 | 冒烟总判定 |
+| --- | --- | --- | --- |
+| 源码（重建后的 venv） | 0 | 1.17 s | 通过 |
+| 打包版（安装副本 exe sha256 `b0df567e…52b0`） | 0 | 1.25 s | 通过 |
+
+两份报告逐行比对：固件 `ArduCopter V4.6.3`、71 类报文、2 619 459 条、1331 参数、
+643 事件、32 告警（critical 0）、曲线通道 5 道、知识库计数、插件页、地图页、
+缓存清理、MAVFTP、U 盘护栏、总判定**全部一致**；只有两处非代码差异——
+「标签区最小宽」795（打包环境的字形度量）vs 910（源码环境），以及 MAVFTP
+0.42 s vs 0.43 s 的计时抖动。
+
+源码最后一次修改是 2026-11-05 17:30:56，早于打包时间 17:33:43，此后只改了文档。
+说明：工作区的 `dist/` 已被环境清理，本次用
+`%LOCALAPPDATA%\Programs\APMLogViewer-0.1.2` 的安装副本（与 Release 的 zip/setup
+同一次构建）代表打包版。
