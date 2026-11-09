@@ -51,6 +51,27 @@ ArduCopter 飞行日志（DataFlash `.BIN`）分析工具，面向 **Copter 4.6.
 构建提交：`FlightTune/APMLogViewer@apmlog-viewer = d8ac7c9`、`APMLogViewer-repo@main = 398ea99`；
 本次 tag 另含更新日志与发行说明。
 
+### Ubuntu 24.04（.deb）
+
+资产 `APMLogViewer-0.1.2-amd64.deb`（63,196,744 B，sha256 `2f37f512032cecb61676e92892fde65879d7b68fca7e4084711423bcd0e374b8`）
+内置 **Python 3.12 + Qt 6.12**，不需要系统 Python 包。
+
+```bash
+sudo apt install ./APMLogViewer-0.1.2-amd64.deb   # 自动补齐依赖
+# 或：sudo dpkg -i ./APMLogViewer-0.1.2-amd64.deb && sudo apt -f install
+apmlogviewer [日志.BIN]                           # 启动（应用菜单同名）
+sudo apt remove apmlogviewer                      # 卸载；purge 连包内文件一起清
+```
+
+运行时依赖：`libc6 (>= 2.35)`、`libgl1`、`libegl1`、`libxkbcommon0`、`libxkbcommon-x11-0`、
+`libxcb1` 及 `libxcb-cursor0 / icccm4 / image0 / keysyms1 / randr0 / render-util0 / shape0 /
+xinerama0 / xkb1`、`libxi6`、`libdbus-1-3`、`libglib2.0-0t64`、`libfontconfig1`、`libfreetype6`；
+建议装 `fonts-noto-cjk`（否则中文显示为方框）。
+
+已知限制：包未签名；`libxcb-cursor0` 等 xcb 库由 apt 自动补齐（直接 `dpkg -i` 后需 `apt -f install`）；
+串口下载需把用户加入 `dialout` 组；Wayland 下若窗口异常用 `QT_QPA_PLATFORM=xcb apmlogviewer`。
+构建脚本与完整说明见资产 `apmlogviewer-linux.spec`、`build_deb.sh`、`UBUNTU.md`。
+
 ### 已知限制（与 0.1.1 相同口径）
 
 - 轨迹差异只在**同一份日志内**比较；跨日志没有共同时间基准，不做对齐；
