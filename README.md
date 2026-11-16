@@ -44,7 +44,7 @@ ArduCopter 飞行日志（DataFlash `.BIN`）分析工具。面向 **Copter 4.6.
 
 ## 安装（Ubuntu 24.04）
 
-Ubuntu 24.04：`sudo apt install ./APMLogViewer-0.1.2-amd64.deb`（[下载 .deb](https://github.com/chuanqinhou/FlightTune/releases/download/apmlog-viewer-v0.1.2/APMLogViewer-0.1.2-amd64.deb)，内置 Python/Qt，无需系统 Python 包）
+Ubuntu 24.04：`sudo apt install ./APMLogViewer-0.1.2-amd64.deb`（[下载 .deb](https://github.com/KonuriMaki2004/APMLogViewer/releases/download/apmlog-viewer-v0.1.2/APMLogViewer-0.1.2-amd64.deb)，内置 Python/Qt，无需系统 Python 包）
 
 ## 环境
 
