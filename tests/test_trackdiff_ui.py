@@ -126,6 +126,34 @@ class TestDiffPanel(unittest.TestCase):
         self.assertIn("总体", text)
         self.assertIn("1 对", text)
 
+    def test_hidden_page_does_not_fall_back_to_all_tracks(self):
+        """地图页不是当前 tab 时（每次切页会 _apply 重建轨迹），差异面板不能按全选算。"""
+        m = self._mk(three_tracks())
+        boxes = self._boxes(m)
+        boxes["XKF1"].setChecked(False)
+        pump(3)
+        m.hide()                          # 切到曲线/告警等页面
+        pump(2)
+        m._update_legend()                # 模拟切页时 app._apply 重建一份
+        pump(2)
+        self.assertEqual(sorted(m.visible_tracks()), ["GPS#0", "POS"])
+        text = self._panel_text(m)
+        self.assertNotIn("XKF1", text, "未勾选的轨迹不能出现在差异面板里")
+        self.assertIn("已选 2 条", text)
+
+    def test_show_event_recomputes_after_hidden_change(self):
+        """隐藏期间改了勾选，切回地图页时要按新选择重算，不能留旧结果。"""
+        m = self._mk(three_tracks())
+        m.hide()
+        pump(2)
+        m.legend.checkbox("XKF1").setChecked(False)
+        pump(2)
+        m.show()
+        pump(3)
+        text = self._panel_text(m)
+        self.assertNotIn("POS ↔ XKF1", text)
+        self.assertIn("已选 2 条", text)
+
     def test_hint_when_only_one_track(self):
         m = self._mk(three_tracks())
         boxes = self._boxes(m)

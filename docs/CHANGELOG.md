@@ -736,3 +736,32 @@ QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest tests -q
 说明：工作区的 `dist/` 已被环境清理，本次用
 `%LOCALAPPDATA%\Programs\APMLogViewer-0.1.2` 的安装副本（与 Release 的 zip/setup
 同一次构建）代表打包版。
+
+---
+
+## 15. 0.1.3（2026-11-10）
+
+### 15.1 修复
+
+- **地图页「轨迹差异」面板在切页后显示全部组合**：地图页不是当前 tab 时整个页面被
+  Qt 隐藏，`TrackMapWidget.visible_tracks()` 曾因 `legend.isVisible() == False` 回退成
+  “全部轨迹”；而切页的 `app._apply()` 会重建轨迹并触发 `_update_diff()`，于是按全选
+  算了一遍，切回地图页后不重算，面板就列出了未勾选轨迹的组合。
+  现在改为以**勾选栏行状态**为唯一真源，并在 `showEvent()`（从别的页切回）补算一次
+  （`apmlog/ui/trackmap.py`）。
+- 新增 2 条 UI 回归：隐藏页时不回退全选；隐藏期间改勾选后 `show()` 按新选择重算。
+
+### 15.2 版本与验证
+
+- 版本号 **0.1.3**（`apmlog/__init__.py` 与 `packaging/installer.iss` 同步）。
+- 全量回归：**1053 passed / 3 skipped / 23 subtests passed（10 分 30 秒）**。
+- 打包版八项自检（103.6 MB 真机日志）：退出码 **0**、加载 1.36 s、冒烟通过；
+  包内核验：版本常量 `0.1.3`、`trackmap` 含 `showEvent`/`visible_tracks`、
+  12 个预设 id 齐全、`apmlog.core.trackdiff` 与 `ui.trackdiffpanel` 在包内。
+
+### 15.3 产物
+
+| 文件 | 大小 | sha256 |
+| --- | --- | --- |
+| `APMLogViewer-0.1.3-win64-setup.exe` | 45,117,756 B | `0e740c97fd68628a34f01eaa267abc8fffbbc54e5a987954aafec06e5eb65b9c` |
+| `APMLogViewer-0.1.3-win64.zip` | 65,131,970 B | `4a92e835712e80da86f1daa155509e9e44e6819a625babbb1475789d30b63b5b` |

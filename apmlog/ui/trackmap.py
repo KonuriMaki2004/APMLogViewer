@@ -573,8 +573,21 @@ class TrackMapWidget(QtWidgets.QWidget):
             self._rebuild_tracks()                  # 按最终缩放重画，别留过期抽稀
 
     def visible_tracks(self) -> list[str]:
-        return self.legend.visible() if self.legend.isVisible() else list(
-            e.key for e in self._entries)
+        """当前勾选的轨迹。
+
+        唯一真源是勾选栏的**行状态**，不能用 ``legend.isVisible()`` 判断：地图页不是
+        当前 tab 时整个页面被 Qt 隐藏，``isVisible()`` 会变成 False；以前据此回退成
+        "全部轨迹"，于是每次切页（`_apply` 会重建轨迹）都会按全选算一遍轨迹差异，
+        切回地图后还留着——面板会列出未勾选轨迹的组合（真机复现）。
+        """
+        if self._entries and self.legend.keys():
+            return self.legend.visible()
+        return [e.key for e in self._entries]
+
+    def showEvent(self, ev: QtGui.QShowEvent) -> None:
+        super().showEvent(ev)
+        # 从别的页切回来：按当前勾选补算一次，不留隐藏期间算出的旧结果
+        self._update_diff()
 
     def set_track(self, tr) -> None:
         """载入 TrackResult。空/全 nan 会降级为占位提示。"""
