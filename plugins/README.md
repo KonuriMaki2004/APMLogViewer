@@ -11,10 +11,14 @@
 
 | 文件 | 作用 |
 | --- | --- |
+| `plugins/插件开发指南.md` | **完整开发指南（873 行）**：五分钟上手、八个挂载点逐个讲、`ctx.store/control/signals` 用法、拒绝条件、FAQ、可整段拷走的示例 |
 | `plugins/example_plugin.py` | 示例插件：七类挂载点各用一次（告警规则、派生通道、预设视图、曲线右键工具、地图图层、独立标签页、导出器），可直接照抄改 |
 | `plugins/theme_plugin.py` | 主题插件示例：`ThemeSpec` 四色（`window/base/text/accent`），可带亮/暗曲线档 |
+| `plugins/installed/ai_assistant/ai_assistant.py` | **本机已安装插件存档**：AI 智能日志识别助手（顶部「AI识别」入口 + 独立标签页、多 API 账号与多模型切换），独立目录存放，不与示例插件混放 |
 
-这两个文件与 `main` 分支 `plugins-samples/` 下的同名文件保持一致，`plugins-samples/` 是文档说明，本分支是**可直接下载使用**的存放点。
+`example_plugin.py` / `theme_plugin.py` 与 `main` 分支 `plugins-samples/` 下的同名文件逐字节一致，`plugins-samples/` 是文档说明，本分支是**可直接下载使用**的存放点。
+
+`plugins/installed/<插件 id>/` 用来归档实际在用的插件，按插件各占一个子目录，不和根目录的示例插件混在一起（插件管理器只扫描目录顶层的 `.py` 与含 `__init__.py`／`plugin.py` 的包目录，所以 `installed/` 下的存档不会被重复加载）。
 
 ## 安装（不用重编 exe）
 
